@@ -79,13 +79,13 @@ $$
 
 这也是链接：<https://cyx2009.top/>
 
-这是图片：![](https://cyx2009.top/assets/img/logo.png)
+这是图片：![](https://cyx2009.top/images/gravatar.png)
 
 ---
 
 这是图片套链接：
 
-[![](https://cyx2009.top/assets/img/logo.png)](https://cyx2009.top/)
+[![](https://cyx2009.top/images/gravatar.png)](https://cyx2009.top/)
 
 这是文字效果套链接 [**~~_点我_~~**](https://cyx2009.top/)
 
