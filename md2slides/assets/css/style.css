@@ -917,12 +917,28 @@ textarea#markdownInput {
     @page {
         size: 1392px 816px;
         margin: 0mm;
-        /* 强制边距为 0，这会告诉浏览器自动去除页眉页脚（网页水印） */
     }
 
-    /* 强制背景色打印生效（针对 Chrome/Edge） */
+    /* 打印模式：移除所有阴影、渐变、滤镜以大幅减小 PDF 体积 */
     * {
+        box-shadow: none !important;
+        filter: none !important;
+        backdrop-filter: none !important;
         -webkit-print-color-adjust: exact !important;
         print-color-adjust: exact !important;
+    }
+
+    /* 移除渐变背景，用纯色代替 */
+    [style*="gradient"] {
+        background-image: none !important;
+    }
+
+    .slide {
+        background-image: none !important;
+    }
+
+    button,
+    .btn {
+        background-image: none !important;
     }
 }
