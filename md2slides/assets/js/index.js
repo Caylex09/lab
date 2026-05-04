@@ -151,8 +151,6 @@ stateDiagram
 >
 > 这是警告
 
----
-
 > [!CAUTION]
 >
 > 这是注意
@@ -1635,7 +1633,7 @@ print(a + b)
                 out.push(lines[i]);
                 continue;
             }
-            const firstLine = m[2] || '';
+            const firstLine = (m[2] || '').trim();
             const body = [];
             if (firstLine) body.push(firstLine);
             let j = i + 1;
@@ -1646,6 +1644,15 @@ print(a + b)
                 j++;
             }
             i = j - 1;
+
+            // 移除首尾多余的空行，防止在开头或结尾生成多余的空段落或换行
+            while (body.length > 0 && !body[0].trim()) {
+                body.shift();
+            }
+            while (body.length > 0 && !body[body.length - 1].trim()) {
+                body.pop();
+            }
+
             const inner = blockify(body.join('\n'));
             stores.push(
                 `<div class="admonition ${type.toLowerCase()}">` +

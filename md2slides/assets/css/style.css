@@ -42,9 +42,9 @@
 }
 
 .katex-display {
-    margin: 1.2em 0;
+    margin: 0 !important;
     overflow: auto hidden;
-    padding: 0.5em 0;
+    padding: 0;
 }
 
 /* 暗色主题适配 */
@@ -578,6 +578,14 @@ textarea#markdownInput {
     padding-left: 4px;
 }
 
+.slide .admonition-content> :first-child {
+    margin-top: 0;
+}
+
+.slide .admonition-content> :last-child {
+    margin-bottom: 0;
+}
+
 .slide .admonition.note {
     border-color: #42b983;
 }
@@ -832,9 +840,9 @@ textarea#markdownInput {
 
 /* 在现有的 CSS 中添加 */
 .katex-display-wrapper {
-    margin: 1.2em 0;
+    margin: 8px 0 10px;
     overflow: auto hidden;
-    padding: 0.5em 0;
+    padding: 0;
     text-align: center;
     /* 设置与段落相同的字体大小基准，确保块级公式与行内公式大小一致 */
     font-size: 22px;
