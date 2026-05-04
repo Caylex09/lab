@@ -66,10 +66,14 @@ SOFTWARE.
             <option value="manual">Manual (\pause)</option>
           </select>
         </label>
+        <button id="watermarkBtn" class="control-btn" title="Set Footer Watermark">Watermark</button>
         <button id="loadSample" class="control-btn" title="Load a sample presentation">Load Sample</button>
         <button id="saveContent" class="control-btn" title="Save content to browser storage">Save</button>
         <button id="fullscreenTop" class="control-btn primary" title="Toggle fullscreen preview">Fullscreen</button>
-        <button id="exportPdf" class="control-btn" title="Export to PDF">Export PDF</button>
+        <button id="exportPdfImg" class="control-btn" title="Export as image-based PDF (Large)">Export PDF
+          (Img)</button>
+        <button id="exportPdfPrint" class="control-btn" title="Export via browser print (Vector, Small)">Export PDF
+          (Print)</button>
       </div>
     </header>
 
@@ -132,15 +136,31 @@ SOFTWARE.
       </section>
     </main>
   </div>
+
+  <!-- Watermark Modal -->
+  <div id="watermarkModal" class="modal-overlay" style="display: none;">
+    <div class="modal-content">
+      <h3 style="margin-top: 0; color: var(--text);">Footer Watermark</h3>
+      <div style="font-size: 14px; color: var(--muted); margin-bottom: 12px;">You can set a custom watermark (like an
+        author name or URL) for the exported PDF.</div>
+      <input type="text" id="watermarkInput" class="modal-input" placeholder="e.g. https://lab.cyx2009.top/md2slides/"
+        value="https://lab.cyx2009.top/md2slides/">
+      <div class="modal-actions">
+        <button id="watermarkCancel" class="control-btn">Cancel</button>
+        <button id="watermarkSave" class="control-btn primary">Save</button>
+      </div>
+    </div>
+  </div>
+
   <script src="assets/js/index.js"></script>
   <!-- html2canvas - 使用 Cloudflare CDN 镜像 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+  <!-- jsPDF umd - 使用 Cloudflare CDN 镜像 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
   <!-- katex - 使用 Cloudflare CDN 镜像，提高中国境内访问稳定性 -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js" crossorigin="anonymous"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
     crossorigin="anonymous"></script>
-  <!-- jsPDF umd - 使用 Cloudflare CDN 镜像 -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 
 </body>
 

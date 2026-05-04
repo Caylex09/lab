@@ -20,7 +20,8 @@
         next: $('#nextBtn'),
         fullscreenTop: $('#fullscreenTop'),
         saveContent: $('#saveContent'),
-        exportBtn: $('#exportPdf'),
+        exportBtnImg: $('#exportPdfImg'),
+        exportBtnPrint: $('#exportPdfPrint'),
         stageWrapper: document.querySelector('.stage-wrapper'),
     };
 
@@ -31,6 +32,8 @@
 后由 [cyx](https://cyx2009.top/) 进行部分优化。
 
 另外，如果你不希望自动分页，可以在上方选择成 Manual 模式，然后手动插入 \`\\pause\` 来分割动画。
+
+update 2026 May 4th: 现在支持了两种导出，一种是原来笨笨的截图，一种是利用 window.print() 的方式。并添加了自定义水印。
 
 ---
 
@@ -1821,174 +1824,175 @@ print(a + b)
     function unescapeMdLink(s) {
         return s.replace(/\((?=.*\))/g, '%28').replace(/\)/g, '%29');
     }
-    if (dom.exportBtn) {
-        dom.exportBtn.addEventListener('click', async () => {
-            if (exportingPdf) return; // 已在导出中，直接忽略
-            exportingPdf = true;
+    async function handleExport(type, btn) {
+        if (exportingPdf) return; // 已在导出中，直接忽略
+        exportingPdf = true;
 
-            // 记录按钮状态并禁用，避免重复点击
-            const btn = dom.exportBtn;
-            const originalText = btn.textContent;
-            btn.disabled = true;
-            btn.textContent = 'Exporting...';
+        // 记录按钮状态并禁用，避免重复点击
+        const originalText = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = 'Exporting...';
 
-            // 创建全屏遮罩层，禁用所有交互
-            const overlay = document.createElement('div');
-            overlay.style.cssText = `
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.7);
-                z-index: 99999;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                color: white;
-                font-size: 24px;
-                user-select: none;
-                pointer-events: all;
-            `;
-            overlay.innerHTML = `
-                <div style="text-align: center;">
-                    <div style="font-size: 32px; margin-bottom: 20px;">Exporting PDF...</div>
-                    <div style="font-size: 16px; opacity: 0.8; margin-bottom: 10px;">Please wait, the page will be unresponsive during export</div>
-                    <div style="font-size: 14px; opacity: 0.7;">You can refresh the page to cancel. The editor content will be saved automatically.</div>
-                </div>
-            `;
-            document.body.appendChild(overlay);
+        // 创建全屏遮罩层，禁用所有交互
+        const overlay = document.createElement('div');
+        overlay.id = 'export-overlay'; // 赋予 ID 以便被 @media print 隐藏
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 99999;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 24px;
+            user-select: none;
+            pointer-events: all;
+        `;
+        overlay.innerHTML = `
+            <div style="text-align: center;">
+                <div style="font-size: 32px; margin-bottom: 20px;">Preparing Document...</div>
+                <div id="export-msg-sub" style="font-size: 16px; opacity: 0.8; margin-bottom: 10px;">Please wait...</div>
+            </div>
+        `;
+        document.body.appendChild(overlay);
 
-            // 禁用 / 恢复交互时用到的事件处理函数引用
-            const handlers = {
-                mouse: null,
-                keyboard: null,
-                touch: null,
+        const handlers = {
+            mouse: null,
+            keyboard: null,
+            touch: null,
+        };
+
+        const disableInteractions = () => {
+            // 禁用所有输入框、按钮、选择框
+            document.querySelectorAll('input, textarea, select, button').forEach(el => {
+                el.setAttribute('data-export-disabled', 'true');
+                el.disabled = true;
+                el.style.pointerEvents = 'none';
+                el.style.cursor = 'not-allowed';
+            });
+            // 禁用所有链接和可点击元素
+            document.querySelectorAll('a, [onclick], [role="button"]').forEach(el => {
+                el.setAttribute('data-export-disabled', 'true');
+                el.style.pointerEvents = 'none';
+                el.style.cursor = 'not-allowed';
+            });
+            // 禁用所有导航按钮
+            document.querySelectorAll('.nav-btn, .control-btn, .control-input').forEach(el => {
+                el.setAttribute('data-export-disabled', 'true');
+                el.style.pointerEvents = 'none';
+                el.style.cursor = 'not-allowed';
+            });
+
+            // 禁用鼠标事件（点击、拖拽等）
+            handlers.mouse = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
             };
+            document.addEventListener('click', handlers.mouse, true);
+            document.addEventListener('mousedown', handlers.mouse, true);
+            document.addEventListener('mouseup', handlers.mouse, true);
+            document.addEventListener('dblclick', handlers.mouse, true);
+            document.addEventListener('contextmenu', handlers.mouse, true);
+            document.addEventListener('dragstart', handlers.mouse, true);
 
-            // 禁用所有交互元素
-            const disableInteractions = () => {
-                // 禁用所有输入框、按钮、选择框
-                document.querySelectorAll('input, textarea, select, button').forEach(el => {
-                    el.setAttribute('data-export-disabled', 'true');
-                    el.disabled = true;
-                    el.style.pointerEvents = 'none';
-                    el.style.cursor = 'not-allowed';
-                });
-                // 禁用所有链接和可点击元素
-                document.querySelectorAll('a, [onclick], [role="button"]').forEach(el => {
-                    el.setAttribute('data-export-disabled', 'true');
-                    el.style.pointerEvents = 'none';
-                    el.style.cursor = 'not-allowed';
-                });
-                // 禁用所有导航按钮
-                document.querySelectorAll('.nav-btn, .control-btn, .control-input').forEach(el => {
-                    el.setAttribute('data-export-disabled', 'true');
-                    el.style.pointerEvents = 'none';
-                    el.style.cursor = 'not-allowed';
-                });
-
-                // 禁用鼠标事件（点击、拖拽等）
-                handlers.mouse = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                };
-                document.addEventListener('click', handlers.mouse, true);
-                document.addEventListener('mousedown', handlers.mouse, true);
-                document.addEventListener('mouseup', handlers.mouse, true);
-                document.addEventListener('dblclick', handlers.mouse, true);
-                document.addEventListener('contextmenu', handlers.mouse, true);
-                document.addEventListener('dragstart', handlers.mouse, true);
-
-                // 禁用键盘事件
-                handlers.keyboard = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                };
-                document.addEventListener('keydown', handlers.keyboard, true);
-                document.addEventListener('keyup', handlers.keyboard, true);
-                document.addEventListener('keypress', handlers.keyboard, true);
-
-                // 禁用触摸事件（移动设备）
-                handlers.touch = (e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    e.stopImmediatePropagation();
-                    return false;
-                };
-                document.addEventListener('touchstart', handlers.touch, true);
-                document.addEventListener('touchmove', handlers.touch, true);
-                document.addEventListener('touchend', handlers.touch, true);
-
-                // 禁用滚动
-                document.body.style.overflow = 'hidden';
+            // 禁用键盘事件
+            handlers.keyboard = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
             };
+            document.addEventListener('keydown', handlers.keyboard, true);
+            document.addEventListener('keyup', handlers.keyboard, true);
+            document.addEventListener('keypress', handlers.keyboard, true);
 
-            // 恢复所有交互元素
-            const enableInteractions = () => {
-                // 恢复所有输入框 / 按钮等
-                document.querySelectorAll('[data-export-disabled="true"]').forEach(el => {
-                    el.removeAttribute('data-export-disabled');
-                    if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') {
-                        el.disabled = false;
-                    }
-                    el.style.pointerEvents = '';
-                    el.style.cursor = '';
-                });
-
-                // 移除鼠标事件监听
-                if (handlers.mouse) {
-                    document.removeEventListener('click', handlers.mouse, true);
-                    document.removeEventListener('mousedown', handlers.mouse, true);
-                    document.removeEventListener('mouseup', handlers.mouse, true);
-                    document.removeEventListener('dblclick', handlers.mouse, true);
-                    document.removeEventListener('contextmenu', handlers.mouse, true);
-                    document.removeEventListener('dragstart', handlers.mouse, true);
-                    handlers.mouse = null;
-                }
-
-                // 移除键盘事件监听
-                if (handlers.keyboard) {
-                    document.removeEventListener('keydown', handlers.keyboard, true);
-                    document.removeEventListener('keyup', handlers.keyboard, true);
-                    document.removeEventListener('keypress', handlers.keyboard, true);
-                    handlers.keyboard = null;
-                }
-
-                // 移除触摸事件监听
-                if (handlers.touch) {
-                    document.removeEventListener('touchstart', handlers.touch, true);
-                    document.removeEventListener('touchmove', handlers.touch, true);
-                    document.removeEventListener('touchend', handlers.touch, true);
-                    handlers.touch = null;
-                }
-
-                // 恢复滚动
-                document.body.style.overflow = '';
+            // 禁用触摸事件（移动设备）
+            handlers.touch = (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.stopImmediatePropagation();
+                return false;
             };
+            document.addEventListener('touchstart', handlers.touch, true);
+            document.addEventListener('touchmove', handlers.touch, true);
+            document.addEventListener('touchend', handlers.touch, true);
 
-            // 禁用交互
-            disableInteractions();
+            // 禁用滚动
+            document.body.style.overflow = 'hidden';
+        };
 
-            try {
-                compileAndRender();
+        // 恢复所有交互元素
+        const enableInteractions = () => {
+            // 恢复所有输入框 / 按钮等
+            document.querySelectorAll('[data-export-disabled="true"]').forEach(el => {
+                el.removeAttribute('data-export-disabled');
+                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') {
+                    el.disabled = false;
+                }
+                el.style.pointerEvents = '';
+                el.style.cursor = '';
+            });
+
+            // 移除鼠标事件监听
+            if (handlers.mouse) {
+                document.removeEventListener('click', handlers.mouse, true);
+                document.removeEventListener('mousedown', handlers.mouse, true);
+                document.removeEventListener('mouseup', handlers.mouse, true);
+                document.removeEventListener('dblclick', handlers.mouse, true);
+                document.removeEventListener('contextmenu', handlers.mouse, true);
+                document.removeEventListener('dragstart', handlers.mouse, true);
+                handlers.mouse = null;
+            }
+
+            // 移除键盘事件监听
+            if (handlers.keyboard) {
+                document.removeEventListener('keydown', handlers.keyboard, true);
+                document.removeEventListener('keyup', handlers.keyboard, true);
+                document.removeEventListener('keypress', handlers.keyboard, true);
+                handlers.keyboard = null;
+            }
+
+            // 移除触摸事件监听
+            if (handlers.touch) {
+                document.removeEventListener('touchstart', handlers.touch, true);
+                document.removeEventListener('touchmove', handlers.touch, true);
+                document.removeEventListener('touchend', handlers.touch, true);
+                handlers.touch = null;
+            }
+
+            // 恢复滚动
+            document.body.style.overflow = '';
+        };
+
+        // 禁用交互
+        disableInteractions();
+
+        try {
+            compileAndRender();
+            const realStage = document.getElementById("stage");
+            const originalHTML = realStage.querySelector("#currentSlide").innerHTML;
+
+            const STAGE_W = 1280;
+            const STAGE_H = 720;
+
+            const watermarkText = document.getElementById('watermarkInput')?.value || "";
+
+            if (type === 'raster') {
+                document.getElementById('export-msg-sub').textContent = "Rendering image PDF... This might take a while and produce a large file.";
 
                 const { jsPDF } = window.jspdf;
-
                 const LEFT_MARGIN = 56;
                 const RIGHT_MARGIN = 56;
                 const TOP_MARGIN = 48;
                 const BOTTOM_MARGIN = 48;
-
-                const STAGE_W = 1280;
-                const STAGE_H = 720;
-
-                const PDF_W = STAGE_W + LEFT_MARGIN + RIGHT_MARGIN; // 1392
-                const PDF_H = STAGE_H + TOP_MARGIN + BOTTOM_MARGIN; // 816
+                const PDF_W = STAGE_W + LEFT_MARGIN + RIGHT_MARGIN;
+                const PDF_H = STAGE_H + TOP_MARGIN + BOTTOM_MARGIN;
 
                 const pdf = new jsPDF({
                     orientation: 'landscape',
@@ -1996,21 +2000,20 @@ print(a + b)
                     format: [PDF_W, PDF_H]
                 });
 
-                const realStage = document.getElementById("stage");
-                const originalHTML = realStage.querySelector("#currentSlide").innerHTML;
-
                 for (let i = 0; i < slides.length; i++) {
-                    // 只替换 currentSlide 内容，不破坏 stage 本体
                     realStage.querySelector("#currentSlide").innerHTML = slides[i];
-                    // 渲染公式与代码高亮后再截图
                     renderKaTeX();
                     await new Promise(r => setTimeout(r, 120));
 
-                    // 克隆整个 stage（包含其 class 与样式）
                     const cloneStage = realStage.cloneNode(true);
 
-                    // 移除 translate 等影响位置的 transform，但保留其他样式 (如果你确实想保留 scale 可改这里)
-                    // 你可以把 "none" 改为保留 scale 的方式，这里保持之前你确定好的行为
+                    if (watermarkText) {
+                        const wm = document.createElement("div");
+                        wm.className = "export-watermark";
+                        wm.textContent = watermarkText;
+                        cloneStage.appendChild(wm);
+                    }
+
                     cloneStage.style.transform = "none";
                     cloneStage.style.left = "0";
                     cloneStage.style.top = "0";
@@ -2018,7 +2021,6 @@ print(a + b)
                     cloneStage.style.width = STAGE_W + "px";
                     cloneStage.style.height = STAGE_H + "px";
 
-                    // 创建容器（包含精确留白）
                     const container = document.createElement("div");
                     container.style.position = "fixed";
                     container.style.left = "-99999px";
@@ -2032,88 +2034,149 @@ print(a + b)
                     container.appendChild(cloneStage);
                     document.body.appendChild(container);
 
-                    // 截图（高清）
                     const canvas = await html2canvas(container, {
                         useCORS: true,
                         backgroundColor: "#fff",
                         scale: 3
                     });
 
-                    // 把图片插入 PDF（缩放到 PDF 尺寸）
                     const imgData = canvas.toDataURL("image/jpeg", 0.98);
                     if (i > 0) pdf.addPage([PDF_W, PDF_H], "landscape");
                     pdf.addImage(imgData, "JPEG", 0, 0, PDF_W, PDF_H);
 
-                    // ====== 在 PDF 上添加可点链接 ======
-                    // 计算 container 在页面上的 clientRect（克隆在页面上，所以有真实的 rect）
                     const containerRect = container.getBoundingClientRect();
-                    // 获取所有链接（相对于 cloneStage 的链接），包括包裹图片的链接
                     const anchors = cloneStage.querySelectorAll('a[href]');
                     anchors.forEach(a => {
                         try {
                             const href = a.getAttribute('href');
-                            if (!href) return;
-                            // 跳过 javascript: 或 空锚
-                            if (/^\s*(javascript:|#)/i.test(href)) return;
-
-                            // 如果链接内包含图片，使用图片的尺寸；否则使用链接本身的尺寸
+                            if (!href || /^\s*(javascript:|#)/i.test(href)) return;
                             const img = a.querySelector('img');
-                            let rect;
-                            if (img) {
-                                // 图片链接：使用图片的边界框
-                                rect = img.getBoundingClientRect();
-                            } else {
-                                // 普通链接：使用链接的边界框
-                                rect = a.getBoundingClientRect();
-                            }
-
-                            // 计算相对于 container 的位置（CSS 像素）
-                            const relLeft = rect.left - containerRect.left;
-                            const relTop = rect.top - containerRect.top;
-                            const relW = rect.width;
-                            const relH = rect.height;
-
-                            // 将 CSS 像素映射到 PDF 像素（因为我们把 canvas 渲染为 PDF_W x PDF_H）
-                            const pdfX = (relLeft / containerRect.width) * PDF_W;
-                            const pdfY = (relTop / containerRect.height) * PDF_H;
-                            const pdfW = (relW / containerRect.width) * PDF_W;
-                            const pdfH = (relH / containerRect.height) * PDF_H;
-
-                            // jsPDF 的链接 API：link(x, y, w, h, { url: '...' })
+                            let rect = img ? img.getBoundingClientRect() : a.getBoundingClientRect();
+                            const pdfX = ((rect.left - containerRect.left) / containerRect.width) * PDF_W;
+                            const pdfY = ((rect.top - containerRect.top) / containerRect.height) * PDF_H;
+                            const pdfW = (rect.width / containerRect.width) * PDF_W;
+                            const pdfH = (rect.height / containerRect.height) * PDF_H;
                             pdf.link(pdfX, pdfY, pdfW, pdfH, { url: href });
                         } catch (e) {
-                            // 单个链接解析失败不影响整体
                             console.warn('add link failed', e);
                         }
                     });
-                    // ====== end add links ======
-
                     container.remove();
                 }
 
-                // 恢复原始当前幻灯片内容
                 realStage.querySelector("#currentSlide").innerHTML = originalHTML;
-
-                // 触发下载
                 pdf.save("slides.pdf");
-                compileAndRender();
-            } catch (err) {
-                console.error('导出 PDF 失败', err);
-            } finally {
-                // 恢复所有交互
-                enableInteractions();
-                // 移除遮罩层
-                if (overlay && overlay.parentNode) {
-                    overlay.parentNode.removeChild(overlay);
+
+            } else if (type === 'vector') {
+                document.getElementById('export-msg-sub').textContent = "Preparing print window... Please manually select 'Save as PDF' from the dialog.";
+
+                const printContainer = document.createElement("div");
+                printContainer.id = "print-container";
+                document.body.appendChild(printContainer);
+
+                for (let i = 0; i < slides.length; i++) {
+                    realStage.querySelector("#currentSlide").innerHTML = slides[i];
+                    renderKaTeX();
+                    await new Promise(r => setTimeout(r, 120));
+
+                    const cloneStage = realStage.cloneNode(true);
+
+                    if (watermarkText) {
+                        const wm = document.createElement("div");
+                        wm.className = "export-watermark";
+                        wm.textContent = watermarkText;
+                        cloneStage.appendChild(wm);
+                    }
+
+                    // Chromium prints ignore pointer-events: none on links
+                    cloneStage.querySelectorAll('a').forEach(a => {
+                        a.style.pointerEvents = 'auto';
+                        a.style.cursor = 'pointer';
+                    });
+
+                    cloneStage.style.transform = "none";
+                    cloneStage.style.left = "0";
+                    cloneStage.style.top = "0";
+                    cloneStage.style.position = "relative";
+                    cloneStage.style.width = STAGE_W + "px";
+                    cloneStage.style.height = STAGE_H + "px";
+
+                    const page = document.createElement("div");
+                    page.className = "print-slide-page";
+
+                    const innerWrapper = document.createElement("div");
+                    innerWrapper.style.width = STAGE_W + "px";
+                    innerWrapper.style.height = STAGE_H + "px";
+                    innerWrapper.style.transform = "scale(1)";
+                    innerWrapper.style.transformOrigin = "center center";
+
+                    innerWrapper.appendChild(cloneStage);
+                    page.appendChild(innerWrapper);
+                    printContainer.appendChild(page);
                 }
-                // 恢复按钮状态
-                btn.disabled = false;
-                btn.textContent = originalText;
-                exportingPdf = false;
+
+                realStage.querySelector("#currentSlide").innerHTML = originalHTML;
+                compileAndRender();
+                await new Promise(r => setTimeout(r, 500));
+
+                const oldTitle = document.title;
+                document.title = "slides";
+                window.print();
+                document.title = oldTitle;
+                printContainer.remove();
             }
-        });
+
+            compileAndRender();
+        } catch (err) {
+            console.error('导出 PDF 失败', err);
+        } finally {
+            enableInteractions();
+            if (overlay && overlay.parentNode) {
+                overlay.parentNode.removeChild(overlay);
+            }
+            btn.disabled = false;
+            btn.textContent = originalText;
+            exportingPdf = false;
+        }
     }
 
+    if (dom.exportBtnImg) {
+        dom.exportBtnImg.addEventListener('click', () => handleExport('raster', dom.exportBtnImg));
+    }
+    if (dom.exportBtnPrint) {
+        dom.exportBtnPrint.addEventListener('click', () => handleExport('vector', dom.exportBtnPrint));
+    }
 
+    // Watermark Modal logic
+    const watermarkBtn = document.getElementById('watermarkBtn');
+    const watermarkModal = document.getElementById('watermarkModal');
+    const watermarkCancel = document.getElementById('watermarkCancel');
+    const watermarkSave = document.getElementById('watermarkSave');
+    const watermarkInput = document.getElementById('watermarkInput');
+
+    if (watermarkBtn && watermarkModal) {
+        watermarkBtn.addEventListener('click', () => {
+            watermarkModal.style.display = 'flex';
+            watermarkInput.focus();
+            watermarkInput.select();
+        });
+        watermarkCancel.addEventListener('click', () => {
+            watermarkModal.style.display = 'none';
+        });
+        watermarkSave.addEventListener('click', () => {
+            watermarkModal.style.display = 'none';
+        });
+        // Click outside to close
+        watermarkModal.addEventListener('click', (e) => {
+            if (e.target === watermarkModal) {
+                watermarkModal.style.display = 'none';
+            }
+        });
+        // ESC/Enter to close
+        watermarkInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') watermarkModal.style.display = 'none';
+            if (e.key === 'Enter') watermarkModal.style.display = 'none';
+        });
+    }
 
 })();
