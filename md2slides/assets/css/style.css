@@ -751,6 +751,7 @@ textarea#markdownInput {
     background: var(--accent);
     transition: width 160ms ease-out;
 }
+
 .export-watermark {
     position: absolute;
     bottom: 20px;
@@ -761,6 +762,7 @@ textarea#markdownInput {
     pointer-events: none;
     z-index: 100;
 }
+
 .help-hint {
     padding: 6px 10px 0 10px;
     color: var(--muted);
