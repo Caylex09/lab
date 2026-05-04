@@ -205,6 +205,8 @@ print(a + b)
 
 你问链接没法截图？我拼成 PDF 之后在对应位置加一个链接属性。
 
+update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积更小，但是保存时略微麻烦，例如目录下有 slides.pdf 不会自动命名为 slides(1).pdf，保存的覆盖好像也有问题，所以最好的方案是重命名或者先删除同名文件再保存。
+
 求求了，给 repo 点个 star 吧。
 
 <https://github.com/Caylex09/lab>
