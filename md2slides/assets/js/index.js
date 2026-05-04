@@ -2161,6 +2161,12 @@ print(a + b)
     const watermarkSave = document.getElementById('watermarkSave');
     const watermarkInput = document.getElementById('watermarkInput');
 
+    // 页面加载时从 localStorage 恢复水印
+    const savedWatermark = localStorage.getItem('m2s-watermark');
+    if (savedWatermark && watermarkInput) {
+        watermarkInput.value = savedWatermark;
+    }
+
     if (watermarkBtn && watermarkModal) {
         watermarkBtn.addEventListener('click', () => {
             watermarkModal.style.display = 'flex';
@@ -2171,6 +2177,10 @@ print(a + b)
             watermarkModal.style.display = 'none';
         });
         watermarkSave.addEventListener('click', () => {
+            // 保存水印到 localStorage
+            if (watermarkInput) {
+                localStorage.setItem('m2s-watermark', watermarkInput.value);
+            }
             watermarkModal.style.display = 'none';
         });
         // Click outside to close
@@ -2182,7 +2192,10 @@ print(a + b)
         // ESC/Enter to close
         watermarkInput.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') watermarkModal.style.display = 'none';
-            if (e.key === 'Enter') watermarkModal.style.display = 'none';
+            if (e.key === 'Enter') {
+                localStorage.setItem('m2s-watermark', watermarkInput.value);
+                watermarkModal.style.display = 'none';
+            }
         });
     }
 
