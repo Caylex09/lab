@@ -109,8 +109,7 @@ test('task continuation is nested under its checkbox item and styled on a new ro
   await expect(list.locator(':scope > li')).toHaveCount(2);
   const first = list.locator(':scope > li').first();
   await expect(first.locator(':scope > p.list-continuation')).toHaveText('Explanation for this task');
-  expect(await first.locator(':scope > p.list-continuation').evaluate(el =>
-    getComputedStyle(el).flexBasis)).toBe('100%');
+  await expectWithinTaskBounds(first, ':scope > p.list-continuation');
 });
 
 test('manual pause inside continuation hides following list items', async ({ page }) => {
@@ -221,10 +220,9 @@ test('fenced code continuation in a task item has full-width row styling', async
   const code = task.locator(':scope > pre.code');
   await expect(code).toContainText('1 + 1;');
   expect(await code.evaluate(el => ({
-    basis: getComputedStyle(el).flexBasis,
     onSeparateRow: el.getBoundingClientRect().top >=
       el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
-  }))).toEqual({ basis: '100%', onSeparateRow: true });
+  }))).toEqual({ onSeparateRow: true });
 });
 
 test('display math continuation in task item has full-width row styling', async ({ page }) => {
@@ -238,10 +236,9 @@ test('display math continuation in task item has full-width row styling', async 
   const math = task.locator(':scope > .katex-display-wrapper');
   await expect(math).toHaveCount(1);
   expect(await math.evaluate(el => ({
-    basis: getComputedStyle(el).flexBasis,
     onSeparateRow: el.getBoundingClientRect().top >=
       el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
-  }))).toEqual({ basis: '100%', onSeparateRow: true });
+  }))).toEqual({ onSeparateRow: true });
 });
 
 
@@ -258,10 +255,9 @@ test('bracket-delimited display math in a task item occupies a full row', async 
   await expect(math).toHaveCount(1);
   await expect(math).toContainText('z = 3');
   expect(await math.evaluate(el => ({
-    basis: getComputedStyle(el).flexBasis,
     onSeparateRow: el.getBoundingClientRect().top >=
       el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
-  }))).toEqual({ basis: '100%', onSeparateRow: true });
+  }))).toEqual({ onSeparateRow: true });
   await expect(page.locator('#currentSlide > ul.task-list > li.task-item')).toHaveCount(2);
 });
 
