@@ -317,3 +317,46 @@ test('multiple blank lines also end a task list before a new list', async ({ pag
   await expect(lists.first().locator(':scope > li.task-item')).toHaveCount(1);
   await expect(lists.nth(1).locator(':scope > li.task-item')).toHaveCount(1);
 });
+
+
+for (const indentation of ['  ', '   ', '\t']) {
+  test('equivalent child marker indentation keeps its own continuation: ' + JSON.stringify(indentation), async ({ page }) => {
+    await page.locator('#markdownInput').fill([
+      '- Parent',
+      indentation + '- Child',
+      '    Child details',
+      '- Sibling'
+    ].join('\n'));
+    const slide = page.locator('#currentSlide');
+    const parent = slide.locator(':scope > ul > li').first();
+    const child = parent.locator(':scope > ul > li').first();
+    await expect(child.locator(':scope > p.list-continuation')).toHaveText('Child details');
+    await expect(parent.locator(':scope > p.list-continuation')).toHaveCount(0);
+    await expect(slide.locator(':scope > ul > li')).toHaveCount(2);
+  });
+}
+
+test('one-space top-level marker allows a two-space continuation', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    ' - Parent with tolerated indentation',
+    '  Parent details',
+    '- Sibling'
+  ].join('\n'));
+  const root = page.locator('#currentSlide > ul');
+  await expect(root.locator(':scope > li')).toHaveCount(2);
+  await expect(root.locator(':scope > li').first().locator(':scope > p.list-continuation'))
+    .toHaveText('Parent details');
+});
+
+test('blank line before continuation keeps normalized three-space child ownership', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '   - Child',
+    '',
+    '    Child details',
+    '- Sibling'
+  ].join('\n'));
+  const parent = page.locator('#currentSlide > ul > li').first();
+  await expect(parent.locator(':scope > ul > li > p.list-continuation')).toHaveText('Child details');
+  await expect(parent.locator(':scope > p.list-continuation')).toHaveCount(0);
+});
