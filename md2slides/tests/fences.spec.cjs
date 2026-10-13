@@ -26,6 +26,8 @@ test('four-backtick fence keeps shorter fences and separators inside code', asyn
   ].join('\n');
   await page.locator('#markdownInput').fill(markdown);
   await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
   await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
   await expect(page.locator('#currentSlide pre.code code')).toContainText('```');
   await expect(page.locator('#currentSlide pre.code code')).toHaveClass(/language-js/);
@@ -39,6 +41,8 @@ test('tilde fences keep slide separators as literal code', async ({ page }) => {
     '~~~python', 'a = 1', '---', 'b = 2', '~~~', '---', '## Following'
   ].join('\n'));
   await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
   await expect(page.locator('#currentSlide pre.code code')).toContainText('a = 1\n---\nb = 2');
   await expect(page.locator('#currentSlide pre.code code')).toHaveClass(/language-python/);
 });
@@ -69,6 +73,8 @@ test('a different fence marker does not close the current code block', async ({ 
     '```js', '~~~', '---', '```', '---', '# Next'
   ].join('\n'));
   await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
   await expect(page.locator('#currentSlide pre.code code')).toContainText('~~~\n---');
 });
 
