@@ -375,8 +375,8 @@ textarea#markdownInput {
 }
 
 /* 任务列表样式 */
+/* Mixed task/ordinary lists keep normal bullets on plain <li> elements. */
 .slide ul.task-list {
-    list-style: none;
     padding-left: 26px;
 }
 
