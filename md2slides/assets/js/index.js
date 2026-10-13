@@ -364,6 +364,17 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         }, 180);
     });
 
+    // A separator line belongs to the slide after it. Ranges are derived
+    // from splitSlideSections(), so --- inside either fence style is not a
+    // separator, and no separate parser is needed in caret/mouse navigation.
+    function getBaseSlideIndexByLineNumber(lineNumber) {
+        if (!slideLineRanges.length) return -1;
+        for (let i = slideLineRanges.length - 1; i > 0; i--) {
+            if (lineNumber >= slideLineRanges[i].start - 1) return i;
+        }
+        return 0;
+    }
+
     // 根据鼠标位置跳转到对应幻灯片
     function getSlideIndexFromMousePosition(e) {
         if (!dom.markdown || slideLineRanges.length === 0) return -1;
@@ -408,22 +419,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 获取点击的行内容
         const clickedLine = lines[lineNumber] || '';
 
-        // 基于分割线计数来确定属于哪个基础幻灯片
-        // 从开头到当前行（包含）统计非代码块中的分割线数量
-        let baseSlideIndex = 0;
-        let inCode = false;
-        for (let i = 0; i <= lineNumber && i < lines.length; i++) {
-            const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-            if (!inCode && line.trim() === '---') {
-                // 分割线之后才算下一张幻灯片
-                if (i < lineNumber) baseSlideIndex++;
-            }
-        }
-
-        // 防护：边界
-        if (baseSlideIndex < 0) baseSlideIndex = 0;
-        if (baseSlideIndex >= slideLineRanges.length) baseSlideIndex = slideLineRanges.length - 1;
+        // Use the compiled, fence-aware boundaries instead of reparsing with
+        // a legacy backtick toggle.
+        const baseSlideIndex = getBaseSlideIndexByLineNumber(lineNumber);
 
         const range = slideLineRanges[baseSlideIndex];
         if (!range) return -1;
@@ -459,24 +457,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 计算光标所在行号
         const before = text.slice(0, caret);
         const lineNumber = before.split('\n').length - 1;
-        // 计算基础幻灯片索引：统计光标行之前（不含当前行）的分隔符数量（排除代码块内）
-        const lines = text.split('\n');
-        let baseSlideIndex = 0;
-        let inCode = false;
-        for (let i = 0; i < lines.length && i < lineNumber; i++) {
-            const ln = lines[i];
-            if (/^```/.test(ln.trim())) inCode = !inCode;
-            if (!inCode && ln.trim() === '---') {
-                baseSlideIndex++;
-            }
-        }
-        // 若当前行本身是分隔符，则归属于分隔符之后
-        if (lines[lineNumber] && lines[lineNumber].trim() === '---') {
-            baseSlideIndex++;
-        }
-        // 边界保护
-        if (baseSlideIndex < 0) baseSlideIndex = 0;
-        if (baseSlideIndex >= slideLineRanges.length) baseSlideIndex = slideLineRanges.length - 1;
+        // The same fence-aware source ranges used by compileAndRender().
+        const baseSlideIndex = getBaseSlideIndexByLineNumber(lineNumber);
 
         const range = slideLineRanges[baseSlideIndex];
         if (!range) return;
@@ -982,49 +964,18 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     function compileAndRender(forceFirst = false) {
         const text = dom.markdown.value ?? '';
-        const parts = splitSlides(text);
+        const sections = splitSlideSections(text);
+        const parts = sections.map(section => section.markdown);
         const baseSlides = parts.map(s => mdToHtml(s.trim()));
 
-        // 计算每个基础幻灯片在文本中的行范围
-        slideLineRanges = [];
+        // Use the same fence-aware boundaries for cursor-to-slide mapping.
+        slideLineRanges = sections.map((section, slideIndex) => ({
+            start: section.start,
+            end: section.end,
+            slideIndex
+        }));
+
         const lines = text.replace(/\r/g, '').split('\n');
-        let slideStartLine = 0;
-        let inCode = false;
-        let slideIndex = 0;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-
-            // 如果遇到分隔符且不在代码块中，开始新的幻灯片
-            if (!inCode && line.trim() === '---' && i > slideStartLine) {
-                // 当前幻灯片的结束行是分隔符的前一行（包括空行）
-                // 这样确保点击在幻灯片末尾的任何位置（包括空行）都能正确匹配
-                const actualEndLine = i - 1;
-
-                // 保存当前幻灯片的行范围（包含所有行，包括末尾的空行）
-                slideLineRanges.push({
-                    start: slideStartLine,
-                    end: actualEndLine,
-                    slideIndex: slideIndex++
-                });
-                slideStartLine = i + 1; // 下一个幻灯片从分隔符的下一行开始
-            }
-        }
-
-        // 添加最后一个幻灯片
-        if (slideStartLine < lines.length) {
-            // 最后一个幻灯片的结束行是文件的最后一行（包括末尾的空行）
-            // 这样确保点击在幻灯片末尾的任何位置（包括空行）都能正确匹配
-            const actualEndLine = lines.length - 1;
-
-            slideLineRanges.push({
-                start: slideStartLine,
-                end: actualEndLine,
-                slideIndex: slideIndex
-            });
-        }
-
         // 调试输出：显示每个幻灯片的行范围
         console.log('\n========== 幻灯片行范围 ==========');
         slideLineRanges.forEach((range, idx) => {
@@ -1088,23 +1039,67 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     });
 }
 
-    function splitSlides(text) {
-        const lines = (text || '').replace(/\r/g, '').split('\n');
-        const out = [];
-        let buf = [];
-        let inCode = false;
+    // Share fence rules between slide splitting, source-line mapping and rendering.
+    function markdownFenceOpener(line) {
+        // List-nested fences may be indented 4+ spaces (or with tabs).
+        // Treat all indentation consistently with slide separator detection.
+        const match = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
+        return { marker: match[1][0], length: match[1].length, info: match[2].trim() };
+    }
+
+    function markdownFenceCloser(line, fence) {
+        const match = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(line);
+        return !!match && match[1][0] === fence.marker && match[1].length >= fence.length;
+    }
+
+    function splitSlideSections(markdown) {
+        const lines = (markdown || '').replace(/\r/g, '').split('\n');
+        const sections = [];
+        let buffer = [];
+        let start = 0;
+        let fence = null;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-            if (!inCode && line.trim() === '---') {
-                out.push(buf.join('\n'));
-                buf = [];
+            if (fence) {
+                if (markdownFenceCloser(line, fence)) fence = null;
             } else {
-                buf.push(line);
+                const opener = markdownFenceOpener(line);
+                if (opener) fence = opener;
+                else if (line.trim() === '---') {
+                    sections.push({ markdown: buffer.join('\n'), start, end: i - 1 });
+                    buffer = [];
+                    start = i + 1;
+                    continue;
+                }
             }
+            buffer.push(line);
         }
-        out.push(buf.join('\n'));
-        return out;
+        sections.push({ markdown: buffer.join('\n'), start, end: lines.length - 1 });
+        return sections;
+    }
+
+    function extractFencedCodeBlocks(markdown, renderBlock) {
+        const lines = markdown.split('\n');
+        const output = [];
+        for (let i = 0; i < lines.length; i++) {
+            const fence = markdownFenceOpener(lines[i]);
+            if (!fence) {
+                output.push(lines[i]);
+                continue;
+            }
+            const code = [];
+            let close = i + 1;
+            while (close < lines.length && !markdownFenceCloser(lines[close], fence)) {
+                code.push(lines[close]);
+                close++;
+            }
+            // An unclosed fence consumes the rest of the slide as literal code.
+            const language = (fence.info.match(/^[^\s]+/) || [''])[0];
+            output.push(renderBlock(language, code.join('\n')));
+            i = close < lines.length ? close : lines.length - 1;
+        }
+        return output.join('\n');
     }
 
     // Basic Markdown to HTML (safe, minimal, business-friendly)
@@ -1112,10 +1107,24 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function mdToHtml(md) {
         if (!md.trim()) return '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:18px;">(Empty slide)</div>';
 
+        // Extract fenced code first so LaTeX and \\pause inside code stay literal.
+        const codeBlocks = [];
+        const textWithFences = extractFencedCodeBlocks(md, (language, code) => {
+            const index = codeBlocks.length;
+            const lower = language.toLowerCase();
+            if (lower === 'mermaid') {
+                codeBlocks.push(`<div class="mermaid">${escapeHtml(code)}</div>`);
+            } else {
+                const langClass = language ? ` class="language-${escapeHtmlAttr(language)}"` : '';
+                codeBlocks.push(`<pre class="code"><code${langClass}>${escapeHtml(code)}</code></pre>`);
+            }
+            return `\uE000CODEBLOCK${index}\uE000`;
+        });
+
         // 1. 先提取 LaTeX 公式块（在转义之前），保存原始内容
         const latexBlocks = [];
         // 先处理 \[...\] 格式
-        let text = md.replace(/(^|\n)(>\s*)?(\\\[[\s\S]*?\\\])/g, (_, lead, quote, body) => {
+        let text = textWithFences.replace(/(^|\n)(>\s*)?(\\\[[\s\S]*?\\\])/g, (_, lead, quote, body) => {
             const i = latexBlocks.length;
             // 保存原始内容（未转义），去掉 blockquote 前缀
             const cleaned = body.replace(/(^|\n)>\s?/g, '$1');
@@ -1133,21 +1142,6 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const placeholder = `\uE001LATEXBLOCK${i}\uE001`;
             // 保留 blockquote 前缀（如果有），稍后会被转义
             return `${lead || ''}${quote || ''}${placeholder}`;
-        });
-
-        // 2. 提取 fenced code blocks（含 mermaid）- 在转义之前提取，保留原始内容
-        const codeBlocks = [];
-        text = text.replace(/```(\w+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
-            const i = codeBlocks.length;
-            const lower = (lang || '').toLowerCase();
-            if (lower === 'mermaid') {
-                codeBlocks.push(`<div class="mermaid">${escapeHtml(code)}</div>`);
-                return `\uE000CODEBLOCK${i}\uE000`;
-            }
-            const langClass = lang ? ` class="language-${escapeHtmlAttr(lang)}"` : '';
-            // code 内容还没有被转义，需要转义
-            codeBlocks.push(`<pre class="code"><code${langClass}>${escapeHtml(code)}</code></pre>`);
-            return `\uE000CODEBLOCK${i}\uE000`;
         });
 
         // 2.3. 提取行内代码块 `...` - 在提取 \pause 之前，避免匹配代码内的 \pause
@@ -1277,6 +1271,13 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         for (let i = 0; i < lines.length; i++) {
             const raw = lines[i];
             const line = raw; // already escaped
+            // Standalone code blocks must not be wrapped in a paragraph.
+            if (/^\uE000CODEBLOCK\d+\uE000$/.test(line.trim())) {
+                flushPara(); closeLists(); closeQuote();
+                out += line.trim();
+                continue;
+            }
+
             // LaTeX 占位符：区分是否在 blockquote 中
             const latexBq = /^&gt;\s*(\uE001LATEXBLOCK\d+\uE001)\s*$/.exec(line);
             if (latexBq) {
