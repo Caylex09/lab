@@ -382,6 +382,8 @@ textarea#markdownInput {
 
 .slide li.task-item {
     display: flex;
+    flex-wrap: wrap;
+    list-style: none;
     align-items: center;
     /* 垂直居中对齐 */
     gap: 12px;
@@ -390,6 +392,13 @@ textarea#markdownInput {
     margin-left: -26px;
     /* 负边距，使整个任务项向左移动 */
     padding-left: 0;
+}
+
+/* Nested lists belong below their task's label rather than beside it. */
+.slide li.task-item > ul,
+.slide li.task-item > ol {
+    flex: 0 0 100%;
+    margin-left: 26px;
 }
 
 .slide li.task-item input[type="checkbox"] {
