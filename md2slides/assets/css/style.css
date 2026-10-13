@@ -394,6 +394,12 @@ textarea#markdownInput {
     padding-left: 0;
 }
 
+/* Keep wrapped paragraphs below task labels inside flex task items. */
+.slide li.task-item > p.list-continuation {
+    flex: 0 0 100%;
+    margin-left: 26px;
+}
+
 /* Nested lists belong below their task's label rather than beside it. */
 .slide li.task-item > ul,
 .slide li.task-item > ol {
