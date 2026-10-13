@@ -1799,27 +1799,48 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function unescapeMdLink(s) {
         return s.replace(/\((?=.*\))/g, '%28').replace(/\)/g, '%29');
     }
+    // Reject on a failed or still-pending resource rather than exporting a partial PDF.
     function waitForExportAssets(root, timeoutMs = 12000) {
-    const images = Array.from(root.querySelectorAll('img')).map(img => {
-        const loaded = img.complete ? Promise.resolve() : new Promise(resolve => {
-            img.addEventListener('load', resolve, { once: true });
-            img.addEventListener('error', resolve, { once: true });
+        const controller = new AbortController();
+        const { signal } = controller;
+        const images = Array.from(root.querySelectorAll('img')).map((img, index) => {
+            const description = img.getAttribute('src') || `image #${index + 1}`;
+            return new Promise((resolve, reject) => {
+                const fail = reason => reject(new Error(`PDF image ${reason}: ${description}`));
+                const loaded = () => {
+                    if (!img.naturalWidth) {
+                        fail('failed to load');
+                        return;
+                    }
+                    if (typeof img.decode === 'function') {
+                        img.decode().then(resolve, () => fail('failed to decode'));
+                    } else {
+                        resolve();
+                    }
+                };
+                if (img.complete) {
+                    loaded();
+                } else {
+                    img.addEventListener('load', loaded, { once: true, signal });
+                    img.addEventListener('error', () => fail('failed to load'), { once: true, signal });
+                    // An image may complete between the first check and listener setup.
+                    if (img.complete) loaded();
+                }
+            });
         });
-        return loaded.then(() => {
-            if (typeof img.decode === 'function' && img.naturalWidth) {
-                return img.decode().catch(() => {});
-            }
+        const fonts = document.fonts ? document.fonts.ready : Promise.resolve();
+        let timeoutId;
+        const timeout = new Promise((_, reject) => {
+            timeoutId = setTimeout(
+                () => reject(new Error(`PDF export timed out after ${timeoutMs}ms waiting for images or fonts`)),
+                timeoutMs
+            );
         });
-    });
-    const fonts = document.fonts ? document.fonts.ready.catch(() => {}) : Promise.resolve();
-    return new Promise(resolve => {
-        const timeout = setTimeout(resolve, timeoutMs);
-        Promise.allSettled([fonts, ...images]).then(() => {
-            clearTimeout(timeout);
-            resolve();
+        return Promise.race([Promise.all([fonts, ...images]), timeout]).finally(() => {
+            clearTimeout(timeoutId);
+            controller.abort();
         });
-    });
-}
+    }
 
     function waitForPrintToFinish() {
     return new Promise((resolve, reject) => {
@@ -1985,16 +2006,14 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 handlers.touch = null;
             }
 
-            // 恢复滚动
-            document.body.style.overflow = '';
         };
 
-        // 禁用交互
+        // Save overflow before disableInteractions() changes it to 'hidden'.
+        const originalOverflow = document.body.style.overflow;
         disableInteractions();
 
         let activeRasterContainer = null;
         let printContainer = null;
-        const originalOverflow = document.body.style.overflow;
         try {
             compileAndRender();
             const realStage = document.getElementById("stage");
