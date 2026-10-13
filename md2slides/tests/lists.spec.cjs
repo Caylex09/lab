@@ -131,6 +131,7 @@ test('text after the final list is not inserted into a list item', async ({ page
     'A regular paragraph'
   ].join('\n'));
   const slide = page.locator('#currentSlide');
+  await expect(slide).toContainText('A regular paragraph');
   await expect(slide.locator(':scope > p')).toHaveText('A regular paragraph');
   await expect(slide.locator('li p')).toHaveCount(0);
 });
