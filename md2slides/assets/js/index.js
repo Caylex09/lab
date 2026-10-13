@@ -1280,7 +1280,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         const ordered = /^\d/.test(match[2]);
         const task = ordered ? null : /^\[([ xX])\]\s+(.*)$/.exec(match[3]);
         return {
-            indent: match[1].replace(/\t/g, '    ').length,
+            // Two spaces (or one tab) form a level; minor extra spaces do not.
+            indent: Math.floor(match[1].replace(/\t/g, '  ').length / 2),
             kind: ordered ? 'ol' : 'ul',
             start: ordered ? parseInt(match[2], 10) : 1,
             task: Boolean(task),
