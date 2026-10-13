@@ -1338,7 +1338,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                         attributes = ` start="${item.start}"`;
                     }
                     html += `<${item.kind}${attributes}>`;
-                    stack.push({ kind: item.kind, indent: item.indent, itemOpen: false, itemIndent: indentation(lines[next]) });
+                    // Store normalized marker indentation rather than raw whitespace.
+                    // An item at depth 1 has the same continuation threshold
+                    // whether it was written with two or three spaces.
+                    stack.push({ kind: item.kind, indent: item.indent, itemOpen: false, itemIndent: item.indent * 2 });
                 } else if (current.itemOpen) {
                     html += '</li>';
                     current.itemOpen = false;
@@ -1349,7 +1352,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                     html += `<li>${inlineify(item.text)}`;
                 }
                 stack[stack.length - 1].itemOpen = true;
-                stack[stack.length - 1].itemIndent = indentation(lines[next]);
+                stack[stack.length - 1].itemIndent = item.indent * 2;
                 next++;
                 continue;
             }
