@@ -993,6 +993,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             slideIndex
         }));
 
+        const lines = text.replace(/\r/g, '').split('\n');
         // 调试输出：显示每个幻灯片的行范围
         console.log('\n========== 幻灯片行范围 ==========');
         slideLineRanges.forEach((range, idx) => {
