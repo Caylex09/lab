@@ -98,3 +98,39 @@ test('an even number of backslashes does not escape a table column pipe', async 
   await expect(table.locator('td').nth(1)).toHaveText('second');
   await expect(table.locator('td').nth(2)).toHaveText('third');
 });
+
+
+test('double-backtick code spans preserve a pipe in one table cell', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Name | Code |',
+    '| --- | --- |',
+    '| item | ``a | b`` |'
+  ].join('\n'));
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('td')).toHaveCount(2);
+  await expect(table.locator('td').nth(1).locator('code')).toHaveText('a | b');
+  await expect(table.locator('td').nth(1)).toHaveText('a | b');
+});
+
+test('long backtick spans can contain shorter backticks and literal pipes', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Name | Code |',
+    '| --- | --- |',
+    '| item | ```a ` | b``` |'
+  ].join('\n'));
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('td')).toHaveCount(2);
+  await expect(table.locator('td').nth(1).locator('code')).toHaveText('a ` | b');
+});
+
+test('inline code in tables does not interpret math or pause controls', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| A | B |',
+    '| --- | --- |',
+    '| item | `\\pause | $$` |'
+  ].join('\n'));
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('td')).toHaveCount(2);
+  await expect(table.locator('td').nth(1).locator('code')).toHaveText('\\pause | $$');
+  await expect(table.locator('.pause-marker')).toHaveCount(0);
+});
