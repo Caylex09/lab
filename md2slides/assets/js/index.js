@@ -1102,6 +1102,50 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         return output.join('\n');
     }
 
+    // Match only equally sized closing backtick runs; preserve code pipes.
+    function protectInlineCodeSpans(source, codeBlocks) {
+        let output = '';
+        for (let i = 0; i < source.length;) {
+            if (source[i] !== '`') {
+                output += source[i++];
+                continue;
+            }
+            let backslashes = 0;
+            for (let k = i - 1; k >= 0 && source[k] === '\\'; k--) backslashes++;
+            if (backslashes % 2 === 1) {
+                output += source[i++];
+                continue;
+            }
+            let openEnd = i;
+            while (source[openEnd] === '`') openEnd++;
+            const fenceLength = openEnd - i;
+            let closeStart = -1;
+            for (let k = openEnd; k < source.length && source[k] !== '\n';) {
+                if (source[k] !== '`') {
+                    k++;
+                    continue;
+                }
+                let closeEnd = k;
+                while (source[closeEnd] === '`') closeEnd++;
+                if (closeEnd - k === fenceLength) {
+                    closeStart = k;
+                    break;
+                }
+                k = closeEnd;
+            }
+            if (closeStart === -1) {
+                output += source.slice(i, openEnd);
+                i = openEnd;
+                continue;
+            }
+            codeBlocks.push(source.slice(openEnd, closeStart));
+            const marker = String.fromCharCode(0xE009);
+            output += marker + 'INLINECODE' + (codeBlocks.length - 1) + marker;
+            i = closeStart + fenceLength;
+        }
+        return output;
+    }
+
     // Basic Markdown to HTML (safe, minimal, business-friendly)
     // 修改 mdToHtml 函数中的代码块处理部分
     function mdToHtml(md) {
@@ -1144,14 +1188,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             return `${lead || ''}${quote || ''}${placeholder}`;
         });
 
-        // 2.3. 提取行内代码块 `...` - 在提取 \pause 之前，避免匹配代码内的 \pause
+        // Protect code spans before table splitting, including multi-backtick spans.
         const inlineCodeBlocks = [];
-        text = text.replace(/`([^`\n]+?)`/g, (m, code) => {
-            const i = inlineCodeBlocks.length;
-            inlineCodeBlocks.push(code);
-            return `\uE009INLINECODE${i}\uE009`;
-        });
-
+        text = protectInlineCodeSpans(text, inlineCodeBlocks);
         // 2.5. 提取 \pause 标记（在转义之前，但要在代码块、LaTeX 块和行内代码之后，避免匹配代码块内的内容）
         // \pause 可以出现在行首、行尾或行中，需要保留上下文
         // 注意：代码块、LaTeX 块和行内代码已经被占位符替换，占位符中包含特殊字符，不会被匹配
@@ -1464,37 +1503,81 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function looksLikeTable(lines, idx) {
         if (idx + 1 >= lines.length) return false;
         const header = lines[idx].trim();
-        const sep = lines[idx + 1].trim();
-        if (!header.includes('|') || !sep.includes('|')) return false;
-        const sepParts = sep.replace(/^\|/, '').replace(/\|$/, '').split('|').map(s => s.trim());
-        if (!sepParts.length) return false;
-        // all separator cells should look like --- or :--- or ---:
-        const sepOk = sepParts.every(cell => /^:?-{2,}:?$/.test(cell));
-        return sepOk;
+        const separator = lines[idx + 1].trim();
+        // Keep a visible pipe as the table signal; a plain --- line is a
+        // presentation slide delimiter in this editor.
+        if (!header.includes('|') && !separator.includes('|')) return false;
+        const headers = splitTableRow(header);
+        const separators = splitTableRow(separator);
+        // Mismatched headings/separators are not tables. Otherwise a malformed
+        // divider can silently discard or shift the user's data.
+        return headers.length > 0 &&
+            headers.length === separators.length &&
+            separators.every(cell => /^:?-{3,}:?$/.test(cell));
     }
 
     function parseTable(lines, start) {
-        const headerLine = lines[start].trim();
-        const alignLine = lines[start + 1].trim();
-        const bodyLines = [];
+        const headers = splitTableRow(lines[start].trim());
+        const aligns = splitTableRow(lines[start + 1].trim()).map(parseAlign);
+        const rows = [];
         let i = start + 2;
         while (i < lines.length && /\|/.test(lines[i])) {
-            bodyLines.push(lines[i].trim());
+            rows.push(splitTableRow(lines[i].trim()));
             i++;
         }
-        const headers = splitTableRow(headerLine);
-        const aligns = splitTableRow(alignLine).map(parseAlign);
-        const rows = bodyLines.map(splitTableRow);
 
-        const thead = `<thead><tr>${headers.map((h, idx) => `<th${alignAttr(aligns[idx])}>${inlineify(h)}</th>`).join('')}</tr></thead>`;
-        const tbody = `<tbody>${rows.map(r => `<tr>${r.map((c, idx) => `<td${alignAttr(aligns[idx])}>${inlineify(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
-        return { tableHtml: `<table class="md-table">${thead}${tbody}</table>`, nextIndex: i - 1 };
+        const thead = '<thead><tr>' + headers.map((header, idx) =>
+            '<th' + alignAttr(aligns[idx]) + '>' + inlineify(header) + '</th>'
+        ).join('') + '</tr></thead>';
+        // GitHub-style tables have a fixed width: pad missing body cells, and
+        // ignore cells past the heading count without changing column positions.
+        const tbody = '<tbody>' + rows.map(row =>
+            '<tr>' + headers.map((_, idx) =>
+                '<td' + alignAttr(aligns[idx]) + '>' + inlineify(row[idx] ?? '') + '</td>'
+            ).join('') + '</tr>'
+        ).join('') + '</tbody>';
+        return { tableHtml: '<table class="md-table">' + thead + tbody + '</table>', nextIndex: i - 1 };
     }
 
+    // Valid inline code spans have been converted to placeholders before this point.
     function splitTableRow(line) {
-        const trimmed = line.replace(/^\|/, '').replace(/\|$/, '');
-        return trimmed.split('|').map(s => s.trim());
+        const text = line.trim();
+        const cells = [];
+        const separators = [];
+        let cell = '';
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '\\' && i + 1 < text.length) {
+                const next = text[i + 1];
+                if (next === '|') {
+                    // An escaped pipe is cell content, not a column boundary.
+                    cell += '|';
+                    i++;
+                    continue;
+                }
+                if (next === '\\') {
+                    // Consume pairs so \\| still separates columns, whereas
+                    // \| and \\\| do not.
+                    cell += '\\\\';
+                    i++;
+                    continue;
+                }
+            }
+            if (char === '|') {
+                cells.push(cell.trim());
+                separators.push(i);
+                cell = '';
+            } else {
+                cell += char;
+            }
+        }
+        cells.push(cell.trim());
+        // Optional outer pipes are structural, not empty first/last cells.
+        if (separators[0] === 0) cells.shift();
+        if (separators[separators.length - 1] === text.length - 1) cells.pop();
+        return cells;
     }
+    
     function parseAlign(cell) {
         if (/^:-+:$/.test(cell)) return 'center';
         if (/^:-+$/.test(cell)) return 'left';
