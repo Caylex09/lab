@@ -1464,37 +1464,80 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function looksLikeTable(lines, idx) {
         if (idx + 1 >= lines.length) return false;
         const header = lines[idx].trim();
-        const sep = lines[idx + 1].trim();
-        if (!header.includes('|') || !sep.includes('|')) return false;
-        const sepParts = sep.replace(/^\|/, '').replace(/\|$/, '').split('|').map(s => s.trim());
-        if (!sepParts.length) return false;
-        // all separator cells should look like --- or :--- or ---:
-        const sepOk = sepParts.every(cell => /^:?-{2,}:?$/.test(cell));
-        return sepOk;
+        const separator = lines[idx + 1].trim();
+        // Keep a visible pipe as the table signal; a plain --- line is a
+        // presentation slide delimiter in this editor.
+        if (!header.includes('|') && !separator.includes('|')) return false;
+        const headers = splitTableRow(header);
+        const separators = splitTableRow(separator);
+        // Mismatched headings/separators are not tables. Otherwise a malformed
+        // divider can silently discard or shift the user's data.
+        return headers.length > 0 &&
+            headers.length === separators.length &&
+            separators.every(cell => /^:?-{3,}:?$/.test(cell));
     }
 
     function parseTable(lines, start) {
-        const headerLine = lines[start].trim();
-        const alignLine = lines[start + 1].trim();
-        const bodyLines = [];
+        const headers = splitTableRow(lines[start].trim());
+        const aligns = splitTableRow(lines[start + 1].trim()).map(parseAlign);
+        const rows = [];
         let i = start + 2;
         while (i < lines.length && /\|/.test(lines[i])) {
-            bodyLines.push(lines[i].trim());
+            rows.push(splitTableRow(lines[i].trim()));
             i++;
         }
-        const headers = splitTableRow(headerLine);
-        const aligns = splitTableRow(alignLine).map(parseAlign);
-        const rows = bodyLines.map(splitTableRow);
 
-        const thead = `<thead><tr>${headers.map((h, idx) => `<th${alignAttr(aligns[idx])}>${inlineify(h)}</th>`).join('')}</tr></thead>`;
-        const tbody = `<tbody>${rows.map(r => `<tr>${r.map((c, idx) => `<td${alignAttr(aligns[idx])}>${inlineify(c)}</td>`).join('')}</tr>`).join('')}</tbody>`;
-        return { tableHtml: `<table class="md-table">${thead}${tbody}</table>`, nextIndex: i - 1 };
+        const thead = '<thead><tr>' + headers.map((header, idx) =>
+            '<th' + alignAttr(aligns[idx]) + '>' + inlineify(header) + '</th>'
+        ).join('') + '</tr></thead>';
+        // GitHub-style tables have a fixed width: pad missing body cells, and
+        // ignore cells past the heading count without changing column positions.
+        const tbody = '<tbody>' + rows.map(row =>
+            '<tr>' + headers.map((_, idx) =>
+                '<td' + alignAttr(aligns[idx]) + '>' + inlineify(row[idx] ?? '') + '</td>'
+            ).join('') + '</tr>'
+        ).join('') + '</tbody>';
+        return { tableHtml: '<table class="md-table">' + thead + tbody + '</table>', nextIndex: i - 1 };
     }
 
     function splitTableRow(line) {
-        const trimmed = line.replace(/^\|/, '').replace(/\|$/, '');
-        return trimmed.split('|').map(s => s.trim());
+        const text = line.trim();
+        const cells = [];
+        const separators = [];
+        let cell = '';
+        for (let i = 0; i < text.length; i++) {
+            const char = text[i];
+            if (char === '\\' && i + 1 < text.length) {
+                const next = text[i + 1];
+                if (next === '|') {
+                    // An escaped pipe is cell content, not a column boundary.
+                    cell += '|';
+                    i++;
+                    continue;
+                }
+                if (next === '\\') {
+                    // Consume pairs so \\| still separates columns, whereas
+                    // \| and \\\| do not.
+                    cell += '\\\\';
+                    i++;
+                    continue;
+                }
+            }
+            if (char === '|') {
+                cells.push(cell.trim());
+                separators.push(i);
+                cell = '';
+            } else {
+                cell += char;
+            }
+        }
+        cells.push(cell.trim());
+        // Optional outer pipes are structural, not empty first/last cells.
+        if (separators[0] === 0) cells.shift();
+        if (separators[separators.length - 1] === text.length - 1) cells.pop();
+        return cells;
     }
+    
     function parseAlign(cell) {
         if (/^:-+:$/.test(cell)) return 'center';
         if (/^:-+$/.test(cell)) return 'left';
