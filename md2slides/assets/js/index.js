@@ -982,48 +982,16 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     function compileAndRender(forceFirst = false) {
         const text = dom.markdown.value ?? '';
-        const parts = splitSlides(text);
+        const sections = splitSlideSections(text);
+        const parts = sections.map(section => section.markdown);
         const baseSlides = parts.map(s => mdToHtml(s.trim()));
 
-        // 计算每个基础幻灯片在文本中的行范围
-        slideLineRanges = [];
-        const lines = text.replace(/\r/g, '').split('\n');
-        let slideStartLine = 0;
-        let inCode = false;
-        let slideIndex = 0;
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-
-            // 如果遇到分隔符且不在代码块中，开始新的幻灯片
-            if (!inCode && line.trim() === '---' && i > slideStartLine) {
-                // 当前幻灯片的结束行是分隔符的前一行（包括空行）
-                // 这样确保点击在幻灯片末尾的任何位置（包括空行）都能正确匹配
-                const actualEndLine = i - 1;
-
-                // 保存当前幻灯片的行范围（包含所有行，包括末尾的空行）
-                slideLineRanges.push({
-                    start: slideStartLine,
-                    end: actualEndLine,
-                    slideIndex: slideIndex++
-                });
-                slideStartLine = i + 1; // 下一个幻灯片从分隔符的下一行开始
-            }
-        }
-
-        // 添加最后一个幻灯片
-        if (slideStartLine < lines.length) {
-            // 最后一个幻灯片的结束行是文件的最后一行（包括末尾的空行）
-            // 这样确保点击在幻灯片末尾的任何位置（包括空行）都能正确匹配
-            const actualEndLine = lines.length - 1;
-
-            slideLineRanges.push({
-                start: slideStartLine,
-                end: actualEndLine,
-                slideIndex: slideIndex
-            });
-        }
+        // Use the same fence-aware boundaries for cursor-to-slide mapping.
+        slideLineRanges = sections.map((section, slideIndex) => ({
+            start: section.start,
+            end: section.end,
+            slideIndex
+        }));
 
         // 调试输出：显示每个幻灯片的行范围
         console.log('\n========== 幻灯片行范围 ==========');
@@ -1088,23 +1056,65 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     });
 }
 
-    function splitSlides(text) {
-        const lines = (text || '').replace(/\r/g, '').split('\n');
-        const out = [];
-        let buf = [];
-        let inCode = false;
+    // Share fence rules between slide splitting, source-line mapping and rendering.
+    function markdownFenceOpener(line) {
+        const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
+        return { marker: match[1][0], length: match[1].length, info: match[2].trim() };
+    }
+
+    function markdownFenceCloser(line, fence) {
+        const match = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+        return !!match && match[1][0] === fence.marker && match[1].length >= fence.length;
+    }
+
+    function splitSlideSections(markdown) {
+        const lines = (markdown || '').replace(/\r/g, '').split('\n');
+        const sections = [];
+        let buffer = [];
+        let start = 0;
+        let fence = null;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-            if (!inCode && line.trim() === '---') {
-                out.push(buf.join('\n'));
-                buf = [];
+            if (fence) {
+                if (markdownFenceCloser(line, fence)) fence = null;
             } else {
-                buf.push(line);
+                const opener = markdownFenceOpener(line);
+                if (opener) fence = opener;
+                else if (line.trim() === '---') {
+                    sections.push({ markdown: buffer.join('\n'), start, end: i - 1 });
+                    buffer = [];
+                    start = i + 1;
+                    continue;
+                }
             }
+            buffer.push(line);
         }
-        out.push(buf.join('\n'));
-        return out;
+        sections.push({ markdown: buffer.join('\n'), start, end: lines.length - 1 });
+        return sections;
+    }
+
+    function extractFencedCodeBlocks(markdown, renderBlock) {
+        const lines = markdown.split('\n');
+        const output = [];
+        for (let i = 0; i < lines.length; i++) {
+            const fence = markdownFenceOpener(lines[i]);
+            if (!fence) {
+                output.push(lines[i]);
+                continue;
+            }
+            const code = [];
+            let close = i + 1;
+            while (close < lines.length && !markdownFenceCloser(lines[close], fence)) {
+                code.push(lines[close]);
+                close++;
+            }
+            // An unclosed fence consumes the rest of the slide as literal code.
+            const language = (fence.info.match(/^[^\s]+/) || [''])[0];
+            output.push(renderBlock(language, code.join('\n')));
+            i = close < lines.length ? close : lines.length - 1;
+        }
+        return output.join('\n');
     }
 
     // Basic Markdown to HTML (safe, minimal, business-friendly)
@@ -1112,10 +1122,24 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function mdToHtml(md) {
         if (!md.trim()) return '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--muted);font-size:18px;">(Empty slide)</div>';
 
+        // Extract fenced code first so LaTeX and \\pause inside code stay literal.
+        const codeBlocks = [];
+        const textWithFences = extractFencedCodeBlocks(md, (language, code) => {
+            const index = codeBlocks.length;
+            const lower = language.toLowerCase();
+            if (lower === 'mermaid') {
+                codeBlocks.push(`<div class="mermaid">${escapeHtml(code)}</div>`);
+            } else {
+                const langClass = language ? ` class="language-${escapeHtmlAttr(language)}"` : '';
+                codeBlocks.push(`<pre class="code"><code${langClass}>${escapeHtml(code)}</code></pre>`);
+            }
+            return `\uE000CODEBLOCK${index}\uE000`;
+        });
+
         // 1. 先提取 LaTeX 公式块（在转义之前），保存原始内容
         const latexBlocks = [];
         // 先处理 \[...\] 格式
-        let text = md.replace(/(^|\n)(>\s*)?(\\\[[\s\S]*?\\\])/g, (_, lead, quote, body) => {
+        let text = textWithFences.replace(/(^|\n)(>\s*)?(\\\[[\s\S]*?\\\])/g, (_, lead, quote, body) => {
             const i = latexBlocks.length;
             // 保存原始内容（未转义），去掉 blockquote 前缀
             const cleaned = body.replace(/(^|\n)>\s?/g, '$1');
@@ -1133,21 +1157,6 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const placeholder = `\uE001LATEXBLOCK${i}\uE001`;
             // 保留 blockquote 前缀（如果有），稍后会被转义
             return `${lead || ''}${quote || ''}${placeholder}`;
-        });
-
-        // 2. 提取 fenced code blocks（含 mermaid）- 在转义之前提取，保留原始内容
-        const codeBlocks = [];
-        text = text.replace(/```(\w+)?\n([\s\S]*?)\n```/g, (m, lang, code) => {
-            const i = codeBlocks.length;
-            const lower = (lang || '').toLowerCase();
-            if (lower === 'mermaid') {
-                codeBlocks.push(`<div class="mermaid">${escapeHtml(code)}</div>`);
-                return `\uE000CODEBLOCK${i}\uE000`;
-            }
-            const langClass = lang ? ` class="language-${escapeHtmlAttr(lang)}"` : '';
-            // code 内容还没有被转义，需要转义
-            codeBlocks.push(`<pre class="code"><code${langClass}>${escapeHtml(code)}</code></pre>`);
-            return `\uE000CODEBLOCK${i}\uE000`;
         });
 
         // 2.3. 提取行内代码块 `...` - 在提取 \pause 之前，避免匹配代码内的 \pause
@@ -1277,6 +1286,13 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         for (let i = 0; i < lines.length; i++) {
             const raw = lines[i];
             const line = raw; // already escaped
+            // Standalone code blocks must not be wrapped in a paragraph.
+            if (/^\uE000CODEBLOCK\d+\uE000$/.test(line.trim())) {
+                flushPara(); closeLists(); closeQuote();
+                out += line.trim();
+                continue;
+            }
+
             // LaTeX 占位符：区分是否在 blockquote 中
             const latexBq = /^&gt;\s*(\uE001LATEXBLOCK\d+\uE001)\s*$/.exec(line);
             if (latexBq) {
