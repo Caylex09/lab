@@ -395,19 +395,20 @@ textarea#markdownInput {
 }
 
 /* Keep wrapped paragraphs below task labels inside flex task items. */
+/* Full-row task content must account for its indent within the flex row.
+   border-box also includes fenced-code padding and borders in that width. */
 .slide li.task-item > p.list-continuation,
 .slide li.task-item > pre.code,
 .slide li.task-item > .katex-display-wrapper,
 .slide li.task-item > .mermaid,
-.slide li.task-item > .mermaid-render {
-    flex: 0 0 100%;
-    margin-left: 26px;
-}
-
-/* Nested lists belong below their task's label rather than beside it. */
+.slide li.task-item > .mermaid-render,
 .slide li.task-item > ul,
 .slide li.task-item > ol {
-    flex: 0 0 100%;
+    flex: 0 0 calc(100% - 26px);
+    width: calc(100% - 26px);
+    max-width: calc(100% - 26px);
+    min-width: 0;
+    box-sizing: border-box;
     margin-left: 26px;
 }
 
