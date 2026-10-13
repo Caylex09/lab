@@ -1041,13 +1041,15 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     // Share fence rules between slide splitting, source-line mapping and rendering.
     function markdownFenceOpener(line) {
-        const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
+        // List-nested fences may be indented 4+ spaces (or with tabs).
+        // Treat all indentation consistently with slide separator detection.
+        const match = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
         if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
         return { marker: match[1][0], length: match[1].length, info: match[2].trim() };
     }
 
     function markdownFenceCloser(line, fence) {
-        const match = /^ {0,3}(`{3,}|~{3,})[ \t]*$/.exec(line);
+        const match = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(line);
         return !!match && match[1][0] === fence.marker && match[1].length >= fence.length;
     }
 
