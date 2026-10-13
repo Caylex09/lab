@@ -131,3 +131,65 @@ test('caret on an actual separator selects the following slide', async ({ page }
   });
   await expect(page.locator('#slideInput')).toHaveValue('2');
 });
+
+
+test('list-indented backtick fences do not split at internal separators', async ({ page }) => {
+  const markdown = [
+    '- First list item',
+    '    ```js',
+    '    console.log("inside");',
+    '    ---',
+    '    ```',
+    '---',
+    '## Next slide'
+  ].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('inside');
+  await page.locator('#markdownInput').evaluate(el => {
+    const caret = el.value.indexOf('    ---') + 5;
+    el.setSelectionRange(caret, caret);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('1');
+});
+
+test('tab-indented tilde fences remain intact including literal separators', async ({ page }) => {
+  const markdown = [
+    '- Item',
+    '\t~~~text',
+    '\t---',
+    '\tcontent',
+    '\t~~~',
+    '---',
+    '## Outside fence'
+  ].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('content');
+});
+
+test('a short nested fence cannot close a longer indented fence', async ({ page }) => {
+  const markdown = [
+    '- Parent',
+    '    ````python',
+    '    ```',
+    '    ---',
+    '    still inside',
+    '    ````',
+    '---',
+    '## Following'
+  ].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('still inside');
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
+});
