@@ -1537,12 +1537,20 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             separators.every(cell => /^:?-{3,}:?$/.test(cell));
     }
 
+    // A pipe may appear in a heading, quote, or list item following a table.
+    // Those lines start a new Markdown block; don't consume them as table rows.
+    function startsBlockAfterTable(line) {
+        return /^#{1,6}\s+/.test(line) ||
+            /^(?:&gt;|>)\s*/.test(line) ||
+            !!parseListItem(line);
+    }
+
     function parseTable(lines, start) {
         const headers = splitTableRow(lines[start].trim());
         const aligns = splitTableRow(lines[start + 1].trim()).map(parseAlign);
         const rows = [];
         let i = start + 2;
-        while (i < lines.length && /\|/.test(lines[i])) {
+        while (i < lines.length && /\|/.test(lines[i]) && !startsBlockAfterTable(lines[i])) {
             rows.push(splitTableRow(lines[i].trim()));
             i++;
         }
