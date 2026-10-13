@@ -360,3 +360,76 @@ test('blank line before continuation keeps normalized three-space child ownershi
   await expect(parent.locator(':scope > ul > li > p.list-continuation')).toHaveText('Child details');
   await expect(parent.locator(':scope > p.list-continuation')).toHaveCount(0);
 });
+
+
+async function expectWithinTaskBounds(task, selector) {
+  const block = task.locator(selector);
+  await expect(block).toHaveCount(1);
+  const metrics = await block.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    const item = element.parentElement.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    return {
+      left: rect.left,
+      right: rect.right,
+      itemLeft: item.left,
+      itemRight: item.right,
+      marginLeft: parseFloat(style.marginLeft),
+      boxSizing: style.boxSizing
+    };
+  });
+  expect(metrics.left).toBeGreaterThanOrEqual(metrics.itemLeft);
+  expect(metrics.right).toBeLessThanOrEqual(metrics.itemRight + 1);
+  expect(metrics.marginLeft).toBeGreaterThan(0);
+  expect(metrics.boxSizing).toBe('border-box');
+}
+
+test('wide fenced code stays inside the task item and slide margins', async ({ page }) => {
+  await page.setViewportSize({ width: 720, height: 650 });
+  const fence = String.fromCharCode(96).repeat(3);
+  await page.locator('#markdownInput').fill([
+    '- [ ] Check a long code block',
+    '    ' + fence + 'javascript',
+    '    const value = "' + 'x'.repeat(300) + '";',
+    '    ' + fence
+  ].join('\n'));
+  const task = page.locator('#currentSlide li.task-item').first();
+  await expect(task.locator(':scope > pre.code code')).toContainText('const value');
+  await expectWithinTaskBounds(task, ':scope > pre.code');
+});
+
+test('display math stays within the task width', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ ] Solve',
+    '  $$',
+    '  x^2 + y^2 = z^2',
+    '  $$'
+  ].join('\n'));
+  await expectWithinTaskBounds(page.locator('#currentSlide li.task-item').first(), ':scope > .katex-display-wrapper');
+});
+
+test('rendered Mermaid stays within the task width', async ({ page }) => {
+  const fence = String.fromCharCode(96).repeat(3);
+  await page.locator('#markdownInput').fill([
+    '- [ ] Flowchart',
+    '    ' + fence + 'mermaid',
+    '    graph LR',
+    '    A --> B',
+    '    ' + fence
+  ].join('\n'));
+  const task = page.locator('#currentSlide li.task-item').first();
+  await expect(task.locator(':scope > .mermaid-render svg')).toHaveCount(1);
+  await expectWithinTaskBounds(task, ':scope > .mermaid-render');
+});
+
+test('nested task lists stay inside the parent task width', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ ] Parent',
+    '  - [x] Child',
+    '  - [ ] Another child',
+    '- [x] Sibling'
+  ].join('\n'));
+  const task = page.locator('#currentSlide > ul.task-list > li.task-item').first();
+  await expect(task.locator(':scope > ul > li.task-item')).toHaveCount(2);
+  await expectWithinTaskBounds(task, ':scope > ul');
+});
