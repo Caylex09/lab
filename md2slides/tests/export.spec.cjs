@@ -97,3 +97,51 @@ test('failed export removes temp nodes and restores original disabled controls',
   expect(await page.locator('#disabled-control').evaluate(el => el.disabled)).toBe(true);
   expect(await page.locator('#print-container').count()).toBe(0);
 });
+
+
+test('PDF export restores the exact pre-export body overflow value', async ({ page }) => {
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('# A slide');
+  await expect(page.locator('#currentSlide h1')).toHaveText('A slide');
+  await page.evaluate(() => { document.body.style.overflow = 'auto'; });
+  await page.locator('#exportPdfImg').click();
+  await expect.poll(() => page.evaluate(() => !!window.__savedPdf)).toBe(true);
+  await expect(page.locator('#export-overlay')).toHaveCount(0);
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('auto');
+});
+
+test('raster export rejects missing images instead of saving a broken PDF', async ({ page }) => {
+  await page.route('**/broken-export.png', route => route.abort('failed'));
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('![broken](/broken-export.png)');
+  await expect(page.locator('#currentSlide img')).toHaveCount(1);
+  await page.evaluate(() => { document.body.style.overflow = 'scroll'; });
+  await page.locator('#exportPdfImg').click();
+  await expect(page.getByRole('alert')).toContainText('PDF image failed to load');
+  await expect(page.locator('#export-overlay')).toHaveCount(0);
+  expect(await page.evaluate(() => !!window.__savedPdf)).toBe(false);
+  expect(await page.evaluate(() => document.body.style.overflow)).toBe('scroll');
+});
+
+test('print export rejects missing images instead of showing the print dialog', async ({ page }) => {
+  await page.route('**/broken-print.png', route => route.abort('failed'));
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('![broken](/broken-print.png)');
+  await expect(page.locator('#currentSlide img')).toHaveCount(1);
+  await page.locator('#exportPdfPrint').click();
+  await expect(page.getByRole('alert')).toContainText('PDF image failed to load');
+  await expect(page.locator('#export-overlay')).toHaveCount(0);
+  expect(await page.evaluate(() => !!window.__printed)).toBe(false);
+});
+
+test('image PDF export times out on a permanently pending asset', async ({ page }) => {
+  // Keep the request pending beyond the export deadline.
+  await page.route('**/stalled-export.png', () => new Promise(() => {}));
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('![stalled](/stalled-export.png)');
+  await expect(page.locator('#currentSlide img')).toHaveCount(1);
+  await page.locator('#exportPdfImg').click();
+  await expect(page.getByRole('alert')).toContainText('PDF export timed out', { timeout: 20000 });
+  await expect(page.locator('#export-overlay')).toHaveCount(0);
+  expect(await page.evaluate(() => !!window.__savedPdf)).toBe(false);
+});
