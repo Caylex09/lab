@@ -1253,7 +1253,11 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 }
             }
 
-            // 对于 \[...\] 格式，保持原样
+            // Display math with \\[...\\] must also be a block, so nested
+            // task-list formulas get the same full-width layout as $...$.
+            if (latex.startsWith('\\[') && latex.endsWith('\\]')) {
+                return `<div class="katex-display-wrapper">${escapeLatexForHtml(latex)}</div>`;
+            }
             return escapeLatexForHtml(latex);
         });
         // 8. 恢复提示块
@@ -1357,6 +1361,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 // items; don't consume a following unindented outside paragraph.
                 let lookahead = next + 1;
                 while (lookahead < lines.length && !lines[lookahead].trim()) lookahead++;
+                // Two or more blank lines end a list. A single blank line can
+                // still separate list items or paragraphs inside a list item.
+                if (lookahead - next > 1) break;
                 const followsItem = lookahead < lines.length && !!parseListItem(lines[lookahead]);
                 const followsContinuation = lookahead < lines.length &&
                     stack.some(level => indentation(lines[lookahead]) >= level.itemIndent + 2);
