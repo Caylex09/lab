@@ -12,7 +12,7 @@ Indented unordered and ordered lists render as properly nested list items. Conse
 
 ## Tables
 
-GitHub-style tables support escaped pipes (`\|`) and pipes inside inline code. Table separators must match the number of header columns. Body rows with missing cells are padded, and extra cells are ignored.
+GitHub-style tables support escaped pipes (`\|`) and pipes inside inline code. Table separators must match the number of header columns. Body rows with missing cells are padded, and extra cells are ignored. Headings, blockquotes, and list items following a table remain separate blocks even if they contain pipes.
 
 ## Regression tests
 
