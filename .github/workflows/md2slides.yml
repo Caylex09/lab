@@ -1,0 +1,22 @@
+name: md2slides tests
+
+on:
+  pull_request:
+    paths:
+      - 'md2slides/**'
+      - '.github/workflows/md2slides.yml'
+
+jobs:
+  browser-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: md2slides
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install
+      - run: npx playwright install --with-deps chromium
+      - run: npm test

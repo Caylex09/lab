@@ -251,7 +251,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     // 自动保存功能：从 localStorage 恢复内容
     const savedContent = localStorage.getItem('m2s-markdown-content');
-    if (savedContent) {
+    if (savedContent !== null) {
         dom.markdown.value = savedContent;
     } else {
         // Fill sample by default
@@ -261,17 +261,13 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     // 自动保存功能：每10秒保存一次到 localStorage
     setInterval(() => {
         const content = dom.markdown.value;
-        if (content && content.trim().length > 0) {
-            localStorage.setItem('m2s-markdown-content', content);
-        }
+        localStorage.setItem('m2s-markdown-content', content);
     }, 10000); // 10秒
 
     // 页面卸载时也保存一次
     window.addEventListener('beforeunload', () => {
         const content = dom.markdown.value;
-        if (content && content.trim().length > 0) {
-            localStorage.setItem('m2s-markdown-content', content);
-        }
+        localStorage.setItem('m2s-markdown-content', content);
     });
 
     // Render initial
@@ -290,17 +286,15 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     if (dom.saveContent) {
         dom.saveContent.addEventListener('click', () => {
             const content = dom.markdown.value;
-            if (content && content.trim().length > 0) {
-                localStorage.setItem('m2s-markdown-content', content);
-                // 视觉反馈：临时改变按钮文本
-                const originalText = dom.saveContent.textContent;
-                dom.saveContent.textContent = 'Saved!';
-                dom.saveContent.style.opacity = '0.7';
-                setTimeout(() => {
-                    dom.saveContent.textContent = originalText;
-                    dom.saveContent.style.opacity = '1';
-                }, 1000);
-            }
+            localStorage.setItem('m2s-markdown-content', content);
+            // 视觉反馈：临时改变按钮文本
+            const originalText = dom.saveContent.textContent;
+            dom.saveContent.textContent = 'Saved!';
+            dom.saveContent.style.opacity = '0.7';
+            setTimeout(() => {
+                dom.saveContent.textContent = originalText;
+                dom.saveContent.style.opacity = '1';
+            }, 1000);
         });
     }
 
@@ -589,98 +583,26 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     // 手动分页模式：根据 \pause 标记生成幻灯片
     function generateManualPaginationSlides(tempDiv, pauseMarkers) {
-        const slides = [];
+        const markers = Array.from(pauseMarkers); // querySelectorAll already follows DOM order
+        if (!markers.length) return [tempDiv.innerHTML];
 
-        // 按照 DOM 顺序排序 pause 标记
-        const sortedPauseMarkers = Array.from(pauseMarkers).sort((a, b) => {
-            const pos = a.compareDocumentPosition(b);
-            if (pos & Node.DOCUMENT_POSITION_PRECEDING) return -1;
-            if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return 1;
-            return 0;
+        // A DOM Range preserves ancestor boundaries when a pause is inside
+        // nested lists, blockquotes or other compound elements.
+        const pages = markers.map(marker => {
+            const range = document.createRange();
+            range.selectNodeContents(tempDiv);
+            range.setEndBefore(marker);
+
+            const page = document.createElement('div');
+            page.appendChild(range.cloneContents());
+            page.querySelectorAll('.pause-marker[data-pause="true"]').forEach(el => el.remove());
+            return page.innerHTML;
         });
 
-        if (sortedPauseMarkers.length === 0) {
-            // 没有 pause 标记，返回单页
-            const slideDiv = tempDiv.cloneNode(true);
-            slideDiv.querySelectorAll('.pause-marker[data-pause="true"]').forEach(marker => marker.remove());
-            slides.push(slideDiv.innerHTML);
-            return slides;
-        }
-
-        // 为每个 pause 标记创建一个分页
-        sortedPauseMarkers.forEach((pauseMarker, idx) => {
-            const slideDiv = tempDiv.cloneNode(true);
-            const allMarkers = Array.from(slideDiv.querySelectorAll('.pause-marker[data-pause="true"]'));
-
-            // 找到当前对应的 pause 标记
-            const currentMarker = allMarkers[idx];
-            if (!currentMarker) return;
-
-            // 找到包含当前 pause 标记的块级元素（P, H1-H6, LI, BLOCKQUOTE 等）
-            let containerElement = currentMarker.parentElement;
-            while (containerElement && containerElement !== slideDiv) {
-                const tagName = containerElement.tagName;
-                if (['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'LI', 'BLOCKQUOTE', 'DIV', 'UL', 'OL', 'TABLE', 'TR', 'TD', 'TH', 'TBODY', 'THEAD'].includes(tagName)) {
-                    break;
-                }
-                containerElement = containerElement.parentElement;
-            }
-
-            if (!containerElement || containerElement === slideDiv) {
-                // 如果找不到合适的容器，就移除该 pause 标记之后的所有内容
-                let node = currentMarker;
-                while (node && node !== slideDiv) {
-                    let nextSibling = node.nextSibling;
-                    while (nextSibling) {
-                        const toRemove = nextSibling;
-                        nextSibling = nextSibling.nextSibling;
-                        toRemove.remove();
-                    }
-                    node = node.parentElement;
-                }
-                currentMarker.remove();
-            } else {
-                // 如果 pause 标记在元素内部，需要在该元素处分割
-
-                // 1. 移除该元素之后的所有兄弟元素
-                let nextSibling = containerElement.nextSibling;
-                while (nextSibling) {
-                    const toRemove = nextSibling;
-                    nextSibling = nextSibling.nextSibling;
-                    toRemove.remove();
-                }
-
-                // 2. 如果 pause 标记在元素内部，需要移除该元素中 pause 标记之后的内容
-                if (containerElement.contains(currentMarker)) {
-                    // 移除 pause 标记之后的所有内容（在同一元素内）
-                    let node = currentMarker.nextSibling;
-                    while (node && containerElement.contains(node)) {
-                        const toRemove = node;
-                        node = node.nextSibling;
-                        toRemove.remove();
-                    }
-                    // 移除 pause 标记本身
-                    currentMarker.remove();
-                } else {
-                    // pause 标记不在容器内，直接移除它
-                    currentMarker.remove();
-                }
-            }
-
-            // 移除所有剩余的 pause 标记（包括当前这个，如果还没移除的话）
-            slideDiv.querySelectorAll('.pause-marker[data-pause="true"]').forEach(marker => marker.remove());
-
-            slides.push(slideDiv.innerHTML);
-        });
-
-        // 添加最后一页（包含所有剩余内容，没有 pause 标记）
-        const lastSlideDiv = tempDiv.cloneNode(true);
-        // 移除所有 pause 标记
-        lastSlideDiv.querySelectorAll('.pause-marker[data-pause="true"]').forEach(marker => marker.remove());
-        slides.push(lastSlideDiv.innerHTML);
-
-        console.log(`手动模式：找到 ${sortedPauseMarkers.length} 个 \\pause 标记，生成了 ${slides.length} 页幻灯片`);
-        return slides;
+        const lastPage = tempDiv.cloneNode(true);
+        lastPage.querySelectorAll('.pause-marker[data-pause="true"]').forEach(el => el.remove());
+        pages.push(lastPage.innerHTML);
+        return pages;
     }
 
     // 生成渐进式幻灯片（类似 PPT 动画效果）
@@ -721,9 +643,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                     if (node.classList.contains('mermaid')) {
                         return NodeFilter.FILTER_REJECT;
                     }
-                    // 跳过 LaTeX 公式块（katex-display-wrapper）
+                    // Include display math as one progressive item.
                     if (node.classList.contains('katex-display-wrapper')) {
-                        return NodeFilter.FILTER_REJECT;
+                        return NodeFilter.FILTER_ACCEPT;
                     }
                     // 跳过 admonition 块内部的元素（admonition 块本身会被处理，但内部元素不应该被单独处理）
                     const parentAdmonition = node.closest('.admonition');
@@ -772,6 +694,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             else if (node.tagName === 'TR' && node.closest('tbody')) {
                 shouldProcess = true;
             }
+            // Display math
+            else if (node.classList.contains('katex-display-wrapper')) {
+                shouldProcess = true;
+            }
             // blockquote
             else if (node.tagName === 'BLOCKQUOTE') {
                 shouldProcess = true;
@@ -786,16 +712,16 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 let hasContent = false;
                 if (node.tagName === 'P') {
                     // 段落：检查文本内容是否为空
-                    hasContent = node.textContent.trim().length > 0;
+                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
                 } else if (node.tagName === 'LI') {
                     // 列表项：检查文本内容是否为空
-                    hasContent = node.textContent.trim().length > 0;
+                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
                 } else if (node.tagName === 'TR') {
                     // 表格行：检查是否有单元格内容
                     hasContent = Array.from(node.querySelectorAll('td')).some(td => td.textContent.trim().length > 0);
                 } else {
                     // 其他元素（标题、blockquote、admonition）：检查文本内容
-                    hasContent = node.textContent.trim().length > 0;
+                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
                 }
 
                 if (hasContent) {
@@ -985,15 +911,15 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             // 检查是否有实际内容（由于已经过滤了空元素，这里应该总是有内容）
             const hasRealContent = newElements.length > 0 && newElements.some(el => {
                 if (el.tagName === 'P' || el.tagName === 'LI') {
-                    return el.textContent.trim().length > 0;
+                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
                 } else if (el.tagName === 'TR') {
                     return Array.from(el.querySelectorAll('td')).some(td => td.textContent.trim().length > 0);
                 } else if (el.tagName === 'PRE' && el.classList.contains('code')) {
                     return el.querySelector('code')?.textContent.trim().length > 0;
                 } else if (el.classList.contains('mermaid')) {
-                    return el.textContent.trim().length > 0;
+                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
                 } else {
-                    return el.textContent.trim().length > 0;
+                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
                 }
             });
 
@@ -1213,7 +1139,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const i = codeBlocks.length;
             const lower = (lang || '').toLowerCase();
             if (lower === 'mermaid') {
-                codeBlocks.push(`<div class="mermaid">${code}</div>`);
+                codeBlocks.push(`<div class="mermaid">${escapeHtml(code)}</div>`);
                 return `\uE000CODEBLOCK${i}\uE000`;
             }
             const langClass = lang ? ` class="language-${escapeHtmlAttr(lang)}"` : '';
@@ -1257,8 +1183,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             return `<code>${escapeHtml(code)}</code>`;
         });
 
-        // 5. 内联转换
-        text = inlineify(text);
+        // blockify() already handles inline formatting on text fragments.
+        // Re-parsing generated HTML corrupts URLs and markup attributes.
 
         // 6. 恢复代码块
         text = text.replace(/\uE000CODEBLOCK(\d+)\uE000/g, (_, i) => codeBlocks[Number(i)] || '');
@@ -1592,10 +1518,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         }
         const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
         if (!mermaidInited) {
-            mermaid.initialize({ startOnLoad: false, theme });
+            mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
             mermaidInited = true;
         } else {
-            mermaid.initialize({ startOnLoad: false, theme });
+            mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
         }
         const blocks = dom.currentSlide.querySelectorAll('.mermaid');
         blocks.forEach((el, idx) => {
@@ -1743,7 +1669,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const safeHref = sanitizeUrl(unescapeMdLink(p.href));
             const safeLinkTitle = p.linkTitle ? ` title="${escapeHtmlAttr(p.linkTitle)}"` : '';
             if (!safeImgSrc || !safeHref) return '';
-            return `<a href="${safeHref}" target="_blank" rel="noopener"${safeLinkTitle}><img alt="${safeAlt}" src="${safeImgSrc}"${safeImgTitle} /></a>`;
+            return `<a href="${escapeHtmlAttr(safeHref)}" target="_blank" rel="noopener"${safeLinkTitle}><img alt="${safeAlt}" src="${escapeHtmlAttr(safeImgSrc)}"${safeImgTitle} /></a>`;
         });
 
         // 6. 恢复单独的图片
@@ -1754,7 +1680,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const safeAlt = escapeHtmlAttr(p.alt);
             const safeTitle = p.title ? ` title="${escapeHtmlAttr(p.title)}"` : '';
             if (!safeSrc) return p.alt ? `<em>${safeAlt}</em>` : '';
-            return `<img alt="${safeAlt}" src="${safeSrc}"${safeTitle} />`;
+            return `<img alt="${safeAlt}" src="${escapeHtmlAttr(safeSrc)}"${safeTitle} />`;
         });
 
         // 7. 恢复单独的链接（链接文本中的内联格式已经在提取时处理成 HTML）
@@ -1765,7 +1691,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const safeTitle = p.title ? ` title="${escapeHtmlAttr(p.title)}"` : '';
             if (!safeHref) return p.txt; // 如果链接无效，返回已处理的文本（可能已包含 HTML 标签）
             // 链接文本已经包含 HTML 标签（如 <strong>、<em>、<del>），直接使用
-            return `<a href="${safeHref}" target="_blank" rel="noopener"${safeTitle}>${p.txt}</a>`;
+            return `<a href="${escapeHtmlAttr(safeHref)}" target="_blank" rel="noopener"${safeTitle}>${p.txt}</a>`;
         });
 
         // Autolinks <url> or <email@example.com>
@@ -1781,7 +1707,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             // 检查是否是 URL（http://, https://, 或协议相对 URL）
             const safeUrl = sanitizeUrl(decoded);
             if (safeUrl) {
-                return `<a href="${safeUrl}" target="_blank" rel="noopener">${escapeHtml(decoded)}</a>`;
+                return `<a href="${escapeHtmlAttr(safeUrl)}" target="_blank" rel="noopener">${escapeHtml(decoded)}</a>`;
             }
             // 不是有效的链接，保持原样
             return m;
@@ -1825,7 +1751,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         try {
             if (!u) return '';
             if (u.startsWith('/') || u.startsWith('./') || u.startsWith('../')) return u;
-            if (u.startsWith('data:image/')) return u;
+            // Do not embed SVG or arbitrary data URLs as images.
+            if (/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(u)) return u;
+            if (/^data:/i.test(u)) return '';
             const url = new URL(u, window.location.origin);
             return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
         } catch { return ''; }
