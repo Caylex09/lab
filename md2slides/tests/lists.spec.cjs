@@ -135,3 +135,63 @@ test('text after the final list is not inserted into a list item', async ({ page
   await expect(slide.locator(':scope > p')).toHaveText('A regular paragraph');
   await expect(slide.locator('li p')).toHaveCount(0);
 });
+
+
+test('one leading space does not create an unwanted nested list', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    ' - Sibling with one space',
+    '  - Child with two spaces',
+    '   - Same-depth child with three spaces',
+    '- Last top-level'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > ul > li')).toHaveCount(3);
+  await expect(slide.locator(':scope > ul > li').nth(0)).toHaveText('Parent');
+  await expect(slide.locator(':scope > ul > li').nth(1).locator(':scope > ul > li')).toHaveCount(2);
+  await expect(slide.locator(':scope > ul > li').nth(1).locator(':scope > ul > li').first()).toHaveText('Child with two spaces');
+  await expect(slide.locator(':scope > ul > li').nth(1).locator(':scope > ul > li').last()).toHaveText('Same-depth child with three spaces');
+  await expect(slide.locator(':scope > ul > li').last()).toHaveText('Last top-level');
+});
+
+test('tabs and two spaces represent the same list nesting level', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '\t- Child with tab',
+    '  - Child with spaces',
+    '    - Grandchild',
+    '   - Another child with three spaces'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > ul > li')).toHaveCount(1);
+  const children = slide.locator(':scope > ul > li > ul > li');
+  await expect(children).toHaveCount(3);
+  await expect(children.nth(0)).toHaveText('Child with tab');
+  await expect(children.nth(1).locator(':scope > ul > li')).toHaveText('Grandchild');
+  await expect(children.nth(2)).toHaveText('Another child with three spaces');
+});
+
+for (const markdown of [
+  ['- [ ] Task', '- Plain item'],
+  ['- Plain item', '- [ ] Task']
+]) {
+  test('mixed task and ordinary list preserves plain bullet: ' + markdown[0], async ({ page }) => {
+    await page.locator('#markdownInput').fill(markdown.join('\n'));
+    const list = page.locator('#currentSlide > ul').first();
+    await expect(list.locator(':scope > li')).toHaveCount(2);
+    await expect(list.locator('li.task-item input[type=checkbox]')).toHaveCount(1);
+    const normal = list.locator(':scope > li:not(.task-item)');
+    await expect(normal).toHaveText('Plain item');
+    expect(await normal.evaluate(el => ({
+      display: getComputedStyle(el).display,
+      listStyle: getComputedStyle(el).listStyleType,
+      hasMarker: !el.classList.contains('task-item'),
+    }))).toEqual({
+      display: 'list-item',
+      listStyle: 'disc',
+      hasMarker: true,
+    });
+    expect(await list.locator('li.task-item').evaluate(el =>
+      getComputedStyle(el).listStyleType)).toBe('none');
+  });
+}
