@@ -2037,6 +2037,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                     container.appendChild(cloneStage);
                     document.body.appendChild(container);
                     activeRasterContainer = container;
+                    // Cloned images may start a fresh network request.
+                    await waitForExportAssets(container);
 
                     const canvas = await html2canvas(container, {
                         useCORS: true,
@@ -2118,6 +2120,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                     innerWrapper.appendChild(cloneStage);
                     page.appendChild(innerWrapper);
                     printContainer.appendChild(page);
+                    // Wait for resources in the actual printable DOM as well.
+                    await waitForExportAssets(page);
                 }
 
                 realStage.querySelector("#currentSlide").innerHTML = originalHTML;
