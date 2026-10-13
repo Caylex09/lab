@@ -395,7 +395,11 @@ textarea#markdownInput {
 }
 
 /* Keep wrapped paragraphs below task labels inside flex task items. */
-.slide li.task-item > p.list-continuation {
+.slide li.task-item > p.list-continuation,
+.slide li.task-item > pre.code,
+.slide li.task-item > .katex-display-wrapper,
+.slide li.task-item > .mermaid,
+.slide li.task-item > .mermaid-render {
     flex: 0 0 100%;
     margin-left: 26px;
 }
