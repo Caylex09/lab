@@ -243,3 +243,77 @@ test('display math continuation in task item has full-width row styling', async 
       el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
   }))).toEqual({ basis: '100%', onSeparateRow: true });
 });
+
+
+test('bracket-delimited display math in a task item occupies a full row', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ ] Solve',
+    '  \\[',
+    '  z = 3',
+    '  \\]',
+    '- [x] Done'
+  ].join('\n'));
+  const task = page.locator('#currentSlide li.task-item').first();
+  const math = task.locator(':scope > .katex-display-wrapper');
+  await expect(math).toHaveCount(1);
+  await expect(math).toContainText('z = 3');
+  expect(await math.evaluate(el => ({
+    basis: getComputedStyle(el).flexBasis,
+    onSeparateRow: el.getBoundingClientRect().top >=
+      el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
+  }))).toEqual({ basis: '100%', onSeparateRow: true });
+  await expect(page.locator('#currentSlide > ul.task-list > li.task-item')).toHaveCount(2);
+});
+
+test('bracket-delimited display math stays a block in a plain list item', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Formula',
+    '  \\[',
+    '  x^2 + y^2',
+    '  \\]',
+    '- Explanation'
+  ].join('\n'));
+  const first = page.locator('#currentSlide > ul > li').first();
+  await expect(first.locator(':scope > .katex-display-wrapper')).toHaveCount(1);
+  await expect(first.locator(':scope > .katex-display-wrapper')).toContainText('x^2 + y^2');
+  await expect(page.locator('#currentSlide > ul > li')).toHaveCount(2);
+});
+
+test('two blank lines separate ordered lists and honor the restarted number', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '1. First',
+    '',
+    '',
+    '5. Restart'
+  ].join('\n'));
+  const lists = page.locator('#currentSlide > ol');
+  await expect(lists).toHaveCount(2);
+  await expect(lists.first().locator(':scope > li')).toHaveCount(1);
+  await expect(lists.first().locator(':scope > li')).toHaveText('First');
+  await expect(lists.nth(1)).toHaveAttribute('start', '5');
+  await expect(lists.nth(1).locator(':scope > li')).toHaveText('Restart');
+});
+
+test('a single blank line may still separate items within the same ordered list', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '1. First',
+    '',
+    '2. Second'
+  ].join('\n'));
+  const lists = page.locator('#currentSlide > ol');
+  await expect(lists).toHaveCount(1);
+  await expect(lists.first().locator(':scope > li')).toHaveCount(2);
+});
+
+test('multiple blank lines also end a task list before a new list', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ ] First task',
+    '',
+    '',
+    '- [x] Another task'
+  ].join('\n'));
+  const lists = page.locator('#currentSlide > ul');
+  await expect(lists).toHaveCount(2);
+  await expect(lists.first().locator(':scope > li.task-item')).toHaveCount(1);
+  await expect(lists.nth(1).locator(':scope > li.task-item')).toHaveCount(1);
+});
