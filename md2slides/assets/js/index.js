@@ -1507,9 +1507,28 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     // Mermaid rendering is async; export must await all diagram callbacks.
     let mermaidScriptPromise = null;
     let mermaidRenderSequence = 0;
-    async function renderMermaid(root = dom.currentSlide) {
-    const blocks = Array.from(root.querySelectorAll('.mermaid'));
-    if (!blocks.length) return;
+    const pendingMermaidRenders = new WeakMap();
+
+    function renderMermaid(root = dom.currentSlide) {
+        const existing = pendingMermaidRenders.get(root);
+        if (existing) {
+            // A new slide can replace the same root while the old render is pending.
+            if (root.querySelector('.mermaid')) return existing.then(() => renderMermaid(root));
+            return existing;
+        }
+        const blocks = Array.from(root.querySelectorAll('.mermaid'));
+        if (!blocks.length) return Promise.resolve();
+
+        const job = renderMermaidBlocks(blocks);
+        pendingMermaidRenders.set(root, job);
+        const clear = () => {
+            if (pendingMermaidRenders.get(root) === job) pendingMermaidRenders.delete(root);
+        };
+        job.then(clear, clear);
+        return job;
+    }
+
+    async function renderMermaidBlocks(blocks) {
     if (typeof mermaid === 'undefined') {
         if (!mermaidScriptPromise) {
             mermaidScriptPromise = new Promise(resolve => {
