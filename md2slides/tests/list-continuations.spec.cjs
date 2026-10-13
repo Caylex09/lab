@@ -164,3 +164,82 @@ test('unindented paragraphs after list remain outside list items', async ({ page
   await expect(slide.locator('li > p')).toHaveCount(1);
   await expect(slide.locator(':scope > ul > li')).toHaveCount(1);
 });
+
+
+test('continuation after a nested sublist attaches to its ancestor item', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  - Child',
+    '  Parent details',
+    '- Sibling'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  const parent = slide.locator(':scope > ul > li').first();
+  await expect(parent.locator(':scope > ul > li')).toHaveText('Child');
+  await expect(parent.locator(':scope > p.list-continuation')).toHaveText('Parent details');
+  await expect(parent.locator(':scope > ul > li > p.list-continuation')).toHaveCount(0);
+  await expect(slide.locator(':scope > ul > li').last()).toHaveText('Sibling');
+});
+
+test('blank line after nested sublist still permits ancestor continuation', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  - Child',
+    '',
+    '  Parent details after blank',
+    '- Sibling'
+  ].join('\n'));
+  const parent = page.locator('#currentSlide > ul > li').first();
+  await expect(parent.locator(':scope > p.list-continuation')).toHaveText('Parent details after blank');
+  await expect(page.locator('#currentSlide > ul > li')).toHaveCount(2);
+});
+
+test('code block after child list is placed in the parent item', async ({ page }) => {
+  const fence = String.fromCharCode(96).repeat(3);
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  - Child',
+    '  ' + fence + 'js',
+    '  return 42;',
+    '  ' + fence,
+    '- Sibling'
+  ].join('\n'));
+  const first = page.locator('#currentSlide > ul > li').first();
+  await expect(first.locator(':scope > pre.code code')).toContainText('return 42;');
+  await expect(first.locator(':scope > ul > li pre.code')).toHaveCount(0);
+});
+
+test('fenced code continuation in a task item has full-width row styling', async ({ page }) => {
+  const fence = String.fromCharCode(96).repeat(3);
+  await page.locator('#markdownInput').fill([
+    '- [ ] Task',
+    '    ' + fence + 'js',
+    '    1 + 1;',
+    '    ' + fence
+  ].join('\n'));
+  const task = page.locator('#currentSlide li.task-item').first();
+  const code = task.locator(':scope > pre.code');
+  await expect(code).toContainText('1 + 1;');
+  expect(await code.evaluate(el => ({
+    basis: getComputedStyle(el).flexBasis,
+    onSeparateRow: el.getBoundingClientRect().top >=
+      el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
+  }))).toEqual({ basis: '100%', onSeparateRow: true });
+});
+
+test('display math continuation in task item has full-width row styling', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ ] Solve',
+    '  $$',
+    '  y = 2',
+    '  $$'
+  ].join('\n'));
+  const task = page.locator('#currentSlide li.task-item').first();
+  const math = task.locator(':scope > .katex-display-wrapper');
+  await expect(math).toHaveCount(1);
+  expect(await math.evaluate(el => ({
+    basis: getComputedStyle(el).flexBasis,
+    onSeparateRow: el.getBoundingClientRect().top >=
+      el.parentElement.querySelector(':scope > span').getBoundingClientRect().bottom - 1
+  }))).toEqual({ basis: '100%', onSeparateRow: true });
+});
