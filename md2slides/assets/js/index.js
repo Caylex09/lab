@@ -1097,7 +1097,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             }
             // An unclosed fence consumes the rest of the slide as literal code.
             const language = (fence.info.match(/^[^\s]+/) || [''])[0];
-            output.push(renderBlock(language, code.join('\n')));
+            // Preserve leading indentation so the block parser can attach a
+            // fenced block to the correct list item.
+            const indent = (lines[i].match(/^[ \t]*/) || [''])[0];
+            output.push(indent + renderBlock(language, code.join('\n')));
             i = close < lines.length ? close : lines.length - 1;
         }
         return output.join('\n');
@@ -1169,24 +1172,24 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 1. 先提取 LaTeX 公式块（在转义之前），保存原始内容
         const latexBlocks = [];
         // 先处理 \[...\] 格式
-        let text = textWithFences.replace(/(^|\n)(>\s*)?(\\\[[\s\S]*?\\\])/g, (_, lead, quote, body) => {
+        let text = textWithFences.replace(/(^|\n)(>\s*)?([ \t]*)(\\\[[\s\S]*?\\\])/g, (_, lead, quote, indent, body) => {
             const i = latexBlocks.length;
             // 保存原始内容（未转义），去掉 blockquote 前缀
             const cleaned = body.replace(/(^|\n)>\s?/g, '$1');
             latexBlocks.push(cleaned);
             const placeholder = `\uE001LATEXBLOCK${i}\uE001`;
             // 保留 blockquote 前缀（如果有），稍后会被转义
-            return `${lead || ''}${quote || ''}${placeholder}`;
+            return `${lead || ''}${quote || ''}${indent || ''}${placeholder}`;
         });
         // 再处理 $$...$$ 格式
-        text = text.replace(/(^|\n)(>\s*)?(\$\$[\s\S]*?\$\$)/g, (_, lead, quote, body) => {
+        text = text.replace(/(^|\n)(>\s*)?([ \t]*)(\$\$[\s\S]*?\$\$)/g, (_, lead, quote, indent, body) => {
             const i = latexBlocks.length;
             // 保存原始内容（未转义），去掉 blockquote 前缀
             const cleaned = body.replace(/(^|\n)>\s?/g, '$1');
             latexBlocks.push(cleaned);
             const placeholder = `\uE001LATEXBLOCK${i}\uE001`;
             // 保留 blockquote 前缀（如果有），稍后会被转义
-            return `${lead || ''}${quote || ''}${placeholder}`;
+            return `${lead || ''}${quote || ''}${indent || ''}${placeholder}`;
         });
 
         // Protect code spans before table splitting, including multi-backtick spans.
@@ -1250,7 +1253,11 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 }
             }
 
-            // 对于 \[...\] 格式，保持原样
+            // Display math with \\[...\\] must also be a block, so nested
+            // task-list formulas get the same full-width layout as $...$.
+            if (latex.startsWith('\\[') && latex.endsWith('\\]')) {
+                return `<div class="katex-display-wrapper">${escapeLatexForHtml(latex)}</div>`;
+            }
             return escapeLatexForHtml(latex);
         });
         // 8. 恢复提示块
@@ -1291,58 +1298,102 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     }
 
     function renderListBlock(lines, start) {
-        const items = [];
-        let next = start;
-        while (next < lines.length) {
-            const item = parseListItem(lines[next]);
-            if (item) {
-                items.push(item);
-                next++;
-            } else if (!lines[next].trim() && next + 1 < lines.length && parseListItem(lines[next + 1])) {
-                // Permit blank lines between items without opening a second list.
-                next++;
-            } else {
-                break;
-            }
-        }
         let html = '';
         const stack = [];
+        let next = start;
+        let continuation = [];
+    
+        const flushContinuation = () => {
+            if (!continuation.length) return;
+            html += `<p class="list-continuation">${inlineify(continuation.join(' '))}</p>`;
+            continuation = [];
+        };
         const closeLevel = () => {
+            flushContinuation();
             const level = stack.pop();
             if (level.itemOpen) html += '</li>';
             html += `</${level.kind}>`;
         };
-        for (const item of items) {
-            while (stack.length && (
-                item.indent < stack[stack.length - 1].indent ||
-                (item.indent === stack[stack.length - 1].indent && item.kind !== stack[stack.length - 1].kind)
-            )) {
+        const indentation = line => line.match(/^[ \t]*/)[0].replace(/\t/g, '  ').length;
+        const standaloneBlock = line => /^(?:\uE000CODEBLOCK|\uE001LATEXBLOCK)\d+[\uE000\uE001]$/.test(line.trim());
+    
+        while (next < lines.length) {
+            const item = parseListItem(lines[next]);
+            if (item) {
+                flushContinuation();
+                while (stack.length && (
+                    item.indent < stack[stack.length - 1].indent ||
+                    (item.indent === stack[stack.length - 1].indent && item.kind !== stack[stack.length - 1].kind)
+                )) closeLevel();
+    
+                const current = stack[stack.length - 1];
+                if (!current || item.indent > current.indent) {
+                    // A nested list must remain inside the preceding parent's <li>.
+                    const depth = stack.length;
+                    let attributes = '';
+                    if (item.kind === 'ul') {
+                        attributes = item.task ? ' class="task-list"' :
+                            ` style="list-style-type: ${['disc', 'circle', 'square'][Math.min(depth, 2)]}"`;
+                    } else if (item.start !== 1) {
+                        attributes = ` start="${item.start}"`;
+                    }
+                    html += `<${item.kind}${attributes}>`;
+                    // Store normalized marker indentation rather than raw whitespace.
+                    // An item at depth 1 has the same continuation threshold
+                    // whether it was written with two or three spaces.
+                    stack.push({ kind: item.kind, indent: item.indent, itemOpen: false, itemIndent: item.indent * 2 });
+                } else if (current.itemOpen) {
+                    html += '</li>';
+                    current.itemOpen = false;
+                }
+                if (item.task) {
+                    html += `<li class="task-item"><input type="checkbox" ${item.checked ? 'checked' : ''} disabled><span>${inlineify(item.text)}</span>`;
+                } else {
+                    html += `<li>${inlineify(item.text)}`;
+                }
+                stack[stack.length - 1].itemOpen = true;
+                stack[stack.length - 1].itemIndent = item.indent * 2;
+                next++;
+                continue;
+            }
+    
+            if (!stack.length) break;
+    
+            if (!lines[next].trim()) {
+                // Blank lines separate paragraphs within an item or between list
+                // items; don't consume a following unindented outside paragraph.
+                let lookahead = next + 1;
+                while (lookahead < lines.length && !lines[lookahead].trim()) lookahead++;
+                // Two or more blank lines end a list. A single blank line can
+                // still separate list items or paragraphs inside a list item.
+                if (lookahead - next > 1) break;
+                const followsItem = lookahead < lines.length && !!parseListItem(lines[lookahead]);
+                const followsContinuation = lookahead < lines.length &&
+                    stack.some(level => indentation(lines[lookahead]) >= level.itemIndent + 2);
+                if (!followsItem && !followsContinuation) break;
+                flushContinuation();
+                next = lookahead;
+                continue;
+            }
+    
+            // A continuation may belong to an ancestor after its nested sublist.
+            // Unwind nested lists until the nearest owning <li> is found.
+            const lineIndent = indentation(lines[next]);
+            while (stack.length && lineIndent < stack[stack.length - 1].itemIndent + 2) {
                 closeLevel();
             }
-            const current = stack[stack.length - 1];
-            if (!current || item.indent > current.indent) {
-                // A nested list must be a child of the previous <li>.
-                const depth = stack.length;
-                let attributes = '';
-                if (item.kind === 'ul') {
-                    attributes = item.task ? ' class="task-list"' :
-                        ` style="list-style-type: ${['disc', 'circle', 'square'][Math.min(depth, 2)]}"`;
-                } else if (item.start !== 1) {
-                    attributes = ` start="${item.start}"`;
-                }
-                html += `<${item.kind}${attributes}>`;
-                stack.push({ kind: item.kind, indent: item.indent, itemOpen: false });
-            } else if (current.itemOpen) {
-                html += '</li>';
-                current.itemOpen = false;
-            }
-            if (item.task) {
-                html += `<li class="task-item"><input type="checkbox" ${item.checked ? 'checked' : ''} disabled><span>${inlineify(item.text)}</span>`;
+            if (!stack.length) break;
+            if (standaloneBlock(lines[next])) {
+                flushContinuation();
+                // Fenced code and display math are preprocessed into placeholders;
+                // retain them as block children of the owning <li>.
+                html += lines[next].trim();
             } else {
-                html += `<li>${inlineify(item.text)}`;
+                continuation.push(lines[next].trim());
             }
-            stack[stack.length - 1].itemOpen = true;
+            next++;
         }
+        flushContinuation();
         while (stack.length) closeLevel();
         return { html, nextIndex: next - 1 };
     }
