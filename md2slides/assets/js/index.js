@@ -348,7 +348,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     // dom.preview.addEventListener('keydown', handleKey);
     document.addEventListener('keydown', (e) => {
         const tag = (e.target && e.target.tagName || '').toLowerCase();
-        if (tag === 'textarea' || tag === 'input') return; // ignore while typing
+        if (['textarea', 'input', 'select', 'button'].includes(tag) || e.target?.isContentEditable) return; // don't hijack form controls
         handleKey(e);
     });
 
@@ -1867,27 +1867,26 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             keyboard: null,
             touch: null,
         };
+        const previousInteractionStates = new Map();
+        const lockElement = el => {
+            if (!previousInteractionStates.has(el)) {
+                previousInteractionStates.set(el, {
+                    disabled: 'disabled' in el ? el.disabled : null,
+                    pointerEvents: el.style.pointerEvents,
+                    cursor: el.style.cursor,
+                    marker: el.getAttribute('data-export-disabled')
+                });
+            }
+            el.setAttribute('data-export-disabled', 'true');
+            if ('disabled' in el) el.disabled = true;
+            el.style.pointerEvents = 'none';
+            el.style.cursor = 'not-allowed';
+        };
 
         const disableInteractions = () => {
-            // 禁用所有输入框、按钮、选择框
-            document.querySelectorAll('input, textarea, select, button').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.disabled = true;
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
-            // 禁用所有链接和可点击元素
-            document.querySelectorAll('a, [onclick], [role="button"]').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
-            // 禁用所有导航按钮
-            document.querySelectorAll('.nav-btn, .control-btn, .control-input').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
+            // Preserve pre-existing disabled/pointer state (including task-list checkboxes).
+            document.querySelectorAll('input, textarea, select, button, a, [onclick], [role="button"], .nav-btn, .control-btn, .control-input')
+                .forEach(lockElement);
 
             // 禁用鼠标事件（点击、拖拽等）
             handlers.mouse = (e) => {
@@ -1931,15 +1930,14 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
         // 恢复所有交互元素
         const enableInteractions = () => {
-            // 恢复所有输入框 / 按钮等
-            document.querySelectorAll('[data-export-disabled="true"]').forEach(el => {
-                el.removeAttribute('data-export-disabled');
-                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') {
-                    el.disabled = false;
-                }
-                el.style.pointerEvents = '';
-                el.style.cursor = '';
+            previousInteractionStates.forEach((state, el) => {
+                if (state.marker === null) el.removeAttribute('data-export-disabled');
+                else el.setAttribute('data-export-disabled', state.marker);
+                if (state.disabled !== null) el.disabled = state.disabled;
+                el.style.pointerEvents = state.pointerEvents;
+                el.style.cursor = state.cursor;
             });
+            previousInteractionStates.clear();
 
             // 移除鼠标事件监听
             if (handlers.mouse) {
@@ -2144,9 +2142,12 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         } finally {
             activeRasterContainer?.remove();
             printContainer?.remove();
-            compileAndRender();
-            enableInteractions();
-            document.body.style.overflow = originalOverflow;
+            try {
+                compileAndRender();
+            } finally {
+                enableInteractions();
+                document.body.style.overflow = originalOverflow;
+            }
             if (overlay && overlay.parentNode) {
                 overlay.parentNode.removeChild(overlay);
             }
