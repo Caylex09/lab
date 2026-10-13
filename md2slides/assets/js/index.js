@@ -1359,15 +1359,20 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 while (lookahead < lines.length && !lines[lookahead].trim()) lookahead++;
                 const followsItem = lookahead < lines.length && !!parseListItem(lines[lookahead]);
                 const followsContinuation = lookahead < lines.length &&
-                    indentation(lines[lookahead]) >= stack[stack.length - 1].itemIndent + 2;
+                    stack.some(level => indentation(lines[lookahead]) >= level.itemIndent + 2);
                 if (!followsItem && !followsContinuation) break;
                 flushContinuation();
                 next = lookahead;
                 continue;
             }
     
-            const current = stack[stack.length - 1];
-            if (indentation(lines[next]) < current.itemIndent + 2) break;
+            // A continuation may belong to an ancestor after its nested sublist.
+            // Unwind nested lists until the nearest owning <li> is found.
+            const lineIndent = indentation(lines[next]);
+            while (stack.length && lineIndent < stack[stack.length - 1].itemIndent + 2) {
+                closeLevel();
+            }
+            if (!stack.length) break;
             if (standaloneBlock(lines[next])) {
                 flushContinuation();
                 // Fenced code and display math are preprocessed into placeholders;
