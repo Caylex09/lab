@@ -668,7 +668,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             // 列表项（只处理顶级列表的直接子项）
             else if (node.tagName === 'LI') {
                 const list = node.parentElement;
-                if ((list.tagName === 'UL' || list.tagName === 'OL') && !list.closest('li')) {
+                // Include nested list items as their own progressive steps.
+                if (list.tagName === 'UL' || list.tagName === 'OL') {
                     shouldProcess = true;
                 }
             }
@@ -1270,35 +1271,91 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         return text;
     }
 
+
+    // Build valid nested lists: child <ul>/<ol> elements belong inside
+    // their parent <li>, and sibling items share the same list element.
+    function parseListItem(line) {
+        const match = /^([ \t]*)([-+*]|\d+[.)])\s+(.*)$/.exec(line);
+        if (!match) return null;
+        const ordered = /^\d/.test(match[2]);
+        const task = ordered ? null : /^\[([ xX])\]\s+(.*)$/.exec(match[3]);
+        return {
+            // Two spaces (or one tab) form a level; minor extra spaces do not.
+            indent: Math.floor(match[1].replace(/\t/g, '  ').length / 2),
+            kind: ordered ? 'ol' : 'ul',
+            start: ordered ? parseInt(match[2], 10) : 1,
+            task: Boolean(task),
+            checked: Boolean(task && task[1].toLowerCase() === 'x'),
+            text: task ? task[2] : match[3]
+        };
+    }
+
+    function renderListBlock(lines, start) {
+        const items = [];
+        let next = start;
+        while (next < lines.length) {
+            const item = parseListItem(lines[next]);
+            if (item) {
+                items.push(item);
+                next++;
+            } else if (!lines[next].trim() && next + 1 < lines.length && parseListItem(lines[next + 1])) {
+                // Permit blank lines between items without opening a second list.
+                next++;
+            } else {
+                break;
+            }
+        }
+        let html = '';
+        const stack = [];
+        const closeLevel = () => {
+            const level = stack.pop();
+            if (level.itemOpen) html += '</li>';
+            html += `</${level.kind}>`;
+        };
+        for (const item of items) {
+            while (stack.length && (
+                item.indent < stack[stack.length - 1].indent ||
+                (item.indent === stack[stack.length - 1].indent && item.kind !== stack[stack.length - 1].kind)
+            )) {
+                closeLevel();
+            }
+            const current = stack[stack.length - 1];
+            if (!current || item.indent > current.indent) {
+                // A nested list must be a child of the previous <li>.
+                const depth = stack.length;
+                let attributes = '';
+                if (item.kind === 'ul') {
+                    attributes = item.task ? ' class="task-list"' :
+                        ` style="list-style-type: ${['disc', 'circle', 'square'][Math.min(depth, 2)]}"`;
+                } else if (item.start !== 1) {
+                    attributes = ` start="${item.start}"`;
+                }
+                html += `<${item.kind}${attributes}>`;
+                stack.push({ kind: item.kind, indent: item.indent, itemOpen: false });
+            } else if (current.itemOpen) {
+                html += '</li>';
+                current.itemOpen = false;
+            }
+            if (item.task) {
+                html += `<li class="task-item"><input type="checkbox" ${item.checked ? 'checked' : ''} disabled><span>${inlineify(item.text)}</span>`;
+            } else {
+                html += `<li>${inlineify(item.text)}`;
+            }
+            stack[stack.length - 1].itemOpen = true;
+        }
+        while (stack.length) closeLevel();
+        return { html, nextIndex: next - 1 };
+    }
+
     function blockify(src) {
         const lines = src.split('\n');
         let out = '';
-        let inUl = false, inOl = false, inTaskList = false, bqDepth = 0, para = '';
-        let ulDepth = 0; // 无序列表的嵌套层级
-        const ulDepths = []; // 存储每个层级的缩进
-        let blankLineCount = 0; // 连续空行计数，用于普通段落中的额外换行（不影响引用等结构）
+        let bqDepth = 0, para = '';
+        let blankLineCount = 0;
 
         const flushPara = () => {
             if (para.trim()) out += `<p>${inlineify(para.trim())}</p>`;
             para = '';
-        };
-        const closeLists = () => {
-            // 关闭所有嵌套的无序列表
-            while (ulDepth > 0) {
-                out += '</ul>';
-                ulDepth--;
-            }
-            ulDepths.length = 0;
-            if (inUl) { out += '</ul>'; inUl = false; }
-            if (inOl) { out += '</ol>'; inOl = false; }
-            if (inTaskList) { out += '</ul>'; inTaskList = false; }
-        };
-
-        // 获取无序列表的样式类型（根据层级）
-        const getUlStyle = (depth) => {
-            if (depth === 0) return 'disc';      // 第一层：黑圆
-            if (depth === 1) return 'circle';    // 第二层：白圆
-            return 'square';                     // 第三层及以后：黑方框
         };
         const closeQuote = () => {
             while (bqDepth > 0) {
@@ -1312,7 +1369,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const line = raw; // already escaped
             // Standalone code blocks must not be wrapped in a paragraph.
             if (/^\uE000CODEBLOCK\d+\uE000$/.test(line.trim())) {
-                flushPara(); closeLists(); closeQuote();
+                flushPara(); closeQuote();
                 out += line.trim();
                 continue;
             }
@@ -1320,7 +1377,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             // LaTeX 占位符：区分是否在 blockquote 中
             const latexBq = /^&gt;\s*(\uE001LATEXBLOCK\d+\uE001)\s*$/.exec(line);
             if (latexBq) {
-                flushPara(); closeLists();
+                flushPara(); 
                 while (bqDepth < 1) { out += '<blockquote>'; bqDepth++; }
                 while (bqDepth > 1) { out += '</blockquote>'; bqDepth--; }
                 // 直接输出占位符，不要包在 <p> 标签里，让公式占据整个引用块
@@ -1329,16 +1386,13 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             }
             if (line.includes('\uE001LATEXBLOCK')) {
                 flushPara();
-                closeLists();
+                
                 closeQuote();
                 out += line + '\n';
                 continue;
             }
             if (!line.trim()) { // blank line
                 flushPara();
-                // 空行关闭有序列表（有序列表遇到空行应该断开）
-                if (inOl) { out += '</ol>'; inOl = false; }
-                // 空行不关闭无序列表，让无序列表可以跨行继续
                 closeQuote();
                 // 记录连续空行数量，稍后在普通段落中统一渲染为 <br>
                 blankLineCount++;
@@ -1350,7 +1404,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const h = /^(#{1,6})\s+(.*)$/.exec(line);
             if (h) {
                 blankLineCount = 0;
-                flushPara(); closeLists(); closeQuote();
+                flushPara(); closeQuote();
                 const level = h[1].length;
                 out += `<h${level}>${inlineify(h[2].trim())}</h${level}>`;
                 continue;
@@ -1359,7 +1413,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             // Tables (GitHub style): header | header\n| --- |\nrows...
             if (looksLikeTable(lines, i)) {
                 blankLineCount = 0;
-                flushPara(); closeLists(); closeQuote();
+                flushPara(); closeQuote();
                 const { tableHtml, nextIndex } = parseTable(lines, i);
                 out += tableHtml;
                 i = nextIndex;
@@ -1370,7 +1424,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             const bq = /^((?:(?:>|\&gt;)\s*)+)(.*)$/.exec(line);
             if (bq) {
                 blankLineCount = 0;
-                flushPara(); closeLists();
+                flushPara(); 
                 const markers = bq[1].match(/(?:>|&gt;)/g);
                 const level = markers ? markers.length : 0;
                 // open to target level
@@ -1381,101 +1435,17 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 continue;
             }
 
-            // Task list: - [ ] or - [x]
-            const task = /^\s*[-+*]\s+\[([ xX])\]\s+(.*)$/.exec(line);
-            if (task) {
+            // Parse contiguous mixed ordered/unordered/task lists as a unit.
+            if (parseListItem(line)) {
                 blankLineCount = 0;
                 flushPara(); closeQuote();
-                closeLists(); // 关闭其他列表
-                if (!inTaskList) { out += '<ul class="task-list">'; inTaskList = true; }
-                const checked = task[1].toLowerCase() === 'x';
-                out += `<li class="task-item"><input type="checkbox" ${checked ? 'checked' : ''} disabled><span>${inlineify(task[2])}</span></li>`;
+                const result = renderListBlock(lines, i);
+                out += result.html;
+                i = result.nextIndex;
                 continue;
             }
 
-            // Unordered list
-            const ul = /^(\s*)[-+*]\s+(.*)$/.exec(line);
-            if (ul) {
-                blankLineCount = 0;
-                flushPara(); closeQuote();
-                // 关闭任务列表
-                if (inTaskList) { out += '</ul>'; inTaskList = false; }
-
-                // 计算当前行的缩进层级（每2个空格或1个tab为一级）
-                const indent = ul[1];
-                const indentLevel = Math.floor(indent.replace(/\t/g, '  ').length / 2);
-
-                // 顶层无序列表时，关闭有序列表
-                if (indentLevel === 0 && inOl) {
-                    out += '</ol>';
-                    inOl = false;
-                }
-
-                // 目标打开深度 = 缩进层级 + 1（根列表算一层）
-                const targetDepth = indentLevel + 1;
-
-                // 关闭多余层级
-                while (ulDepth > targetDepth) {
-                    out += '</ul>';
-                    ulDepth--;
-                }
-
-                // 打开缺失层级
-                while (ulDepth < targetDepth) {
-                    const style = getUlStyle(ulDepth); // 当前深度决定样式
-                    out += `<ul style="list-style-type: ${style}">`;
-                    ulDepth++;
-                }
-
-                out += `<li>${inlineify(ul[2])}</li>`;
-                inUl = true;
-                continue;
-            }
-
-            // Ordered list
-            const ol = /^(\s*)\d+[\.)]\s+(.*)$/.exec(line);
-            if (ol) {
-                blankLineCount = 0;
-                flushPara(); closeQuote();
-                // 关闭任务列表
-                if (inTaskList) { out += '</ul>'; inTaskList = false; }
-
-                // 计算缩进层级
-                const indent = ol[1];
-                const indentLevel = Math.floor(indent.replace(/\t/g, '  ').length / 2);
-
-                // 如果缩进层级为 0，关闭无序列表（但不关闭有序列表，保持连续性）
-                if (indentLevel === 0) {
-                    // 关闭所有嵌套的无序列表
-                    while (ulDepth > 0) {
-                        out += '</ul>';
-                        ulDepths.pop();
-                        ulDepth--;
-                    }
-                    if (inUl) { out += '</ul>'; inUl = false; }
-                    // 顶级有序列表：如果还没有打开，就打开它
-                    if (!inOl) { out += '<ol>'; inOl = true; }
-                } else if (indentLevel > 0) {
-                    // 嵌套的有序列表：关闭超出当前层级的所有列表
-                    while (ulDepth > indentLevel) {
-                        out += '</ul>';
-                        ulDepths.pop();
-                        ulDepth--;
-                    }
-                    // 如果当前层级是有序列表，需要先关闭它
-                    if (inOl) { out += '</ol>'; inOl = false; }
-                    // 打开新的有序列表（作为嵌套列表）
-                    out += '<ol>';
-                    inOl = true;
-                }
-
-                // ol[2] 是捕获的内容部分（去掉了数字和点/括号）
-                const content = (ol[2] || '').trim();
-                out += `<li>${inlineify(content)}</li>`;
-                continue;
-            }
-
-            // Default: paragraph continuation（普通段落才使用空行产生的额外 <br>）
+            // Default: paragraph continuation (after lists are closed).
             if (blankLineCount > 0) {
                 const brCount = Math.ceil(blankLineCount / 2);
                 for (let j = 0; j < brCount; j++) {
@@ -1487,7 +1457,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         }
 
         flushPara();
-        closeLists();
+        
         closeQuote();
 
         // 处理结尾处可能存在的空行
