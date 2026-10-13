@@ -87,3 +87,47 @@ test('fenced code is rendered as a sibling, not inside a paragraph', async ({ pa
   await expect(page.locator('#currentSlide p pre')).toHaveCount(0);
   await expect(page.locator('#currentSlide pre.code')).toHaveCount(1);
 });
+
+
+test('caret inside tilde-fenced --- stays on the containing slide', async ({ page }) => {
+  const markdown = ['~~~python', 'first', '---', 'inside fence', '~~~', '---', '## Next slide'].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#markdownInput').evaluate(el => {
+    const position = el.value.indexOf('inside fence');
+    el.setSelectionRange(position, position);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('1');
+
+  await page.locator('#markdownInput').evaluate(el => {
+    const position = el.value.indexOf('## Next slide');
+    el.setSelectionRange(position, position);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('2');
+});
+
+test('caret after shorter fence within long fence does not switch slides', async ({ page }) => {
+  const markdown = ['````js', '```', '---', 'still code', '````', '---', '## Next'].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#markdownInput').evaluate(el => {
+    const position = el.value.indexOf('still code');
+    el.setSelectionRange(position, position);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('1');
+});
+
+test('caret on an actual separator selects the following slide', async ({ page }) => {
+  const markdown = ['## First', '---', '## Second'].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#markdownInput').evaluate(el => {
+    const position = el.value.indexOf('---');
+    el.setSelectionRange(position, position);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('2');
+});
