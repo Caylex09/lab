@@ -1102,6 +1102,50 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         return output.join('\n');
     }
 
+    // Match only equally sized closing backtick runs; preserve code pipes.
+    function protectInlineCodeSpans(source, codeBlocks) {
+        let output = '';
+        for (let i = 0; i < source.length;) {
+            if (source[i] !== '`') {
+                output += source[i++];
+                continue;
+            }
+            let backslashes = 0;
+            for (let k = i - 1; k >= 0 && source[k] === '\\'; k--) backslashes++;
+            if (backslashes % 2 === 1) {
+                output += source[i++];
+                continue;
+            }
+            let openEnd = i;
+            while (source[openEnd] === '`') openEnd++;
+            const fenceLength = openEnd - i;
+            let closeStart = -1;
+            for (let k = openEnd; k < source.length && source[k] !== '\n';) {
+                if (source[k] !== '`') {
+                    k++;
+                    continue;
+                }
+                let closeEnd = k;
+                while (source[closeEnd] === '`') closeEnd++;
+                if (closeEnd - k === fenceLength) {
+                    closeStart = k;
+                    break;
+                }
+                k = closeEnd;
+            }
+            if (closeStart === -1) {
+                output += source.slice(i, openEnd);
+                i = openEnd;
+                continue;
+            }
+            codeBlocks.push(source.slice(openEnd, closeStart));
+            const marker = String.fromCharCode(0xE009);
+            output += marker + 'INLINECODE' + (codeBlocks.length - 1) + marker;
+            i = closeStart + fenceLength;
+        }
+        return output;
+    }
+
     // Basic Markdown to HTML (safe, minimal, business-friendly)
     // 修改 mdToHtml 函数中的代码块处理部分
     function mdToHtml(md) {
@@ -1144,14 +1188,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             return `${lead || ''}${quote || ''}${placeholder}`;
         });
 
-        // 2.3. 提取行内代码块 `...` - 在提取 \pause 之前，避免匹配代码内的 \pause
+        // Protect code spans before table splitting, including multi-backtick spans.
         const inlineCodeBlocks = [];
-        text = text.replace(/`([^`\n]+?)`/g, (m, code) => {
-            const i = inlineCodeBlocks.length;
-            inlineCodeBlocks.push(code);
-            return `\uE009INLINECODE${i}\uE009`;
-        });
-
+        text = protectInlineCodeSpans(text, inlineCodeBlocks);
         // 2.5. 提取 \pause 标记（在转义之前，但要在代码块、LaTeX 块和行内代码之后，避免匹配代码块内的内容）
         // \pause 可以出现在行首、行尾或行中，需要保留上下文
         // 注意：代码块、LaTeX 块和行内代码已经被占位符替换，占位符中包含特殊字符，不会被匹配
@@ -1500,6 +1539,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         return { tableHtml: '<table class="md-table">' + thead + tbody + '</table>', nextIndex: i - 1 };
     }
 
+    // Valid inline code spans have been converted to placeholders before this point.
     function splitTableRow(line) {
         const text = line.trim();
         const cells = [];
