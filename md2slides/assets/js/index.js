@@ -364,6 +364,17 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         }, 180);
     });
 
+    // A separator line belongs to the slide after it. Ranges are derived
+    // from splitSlideSections(), so --- inside either fence style is not a
+    // separator, and no separate parser is needed in caret/mouse navigation.
+    function getBaseSlideIndexByLineNumber(lineNumber) {
+        if (!slideLineRanges.length) return -1;
+        for (let i = slideLineRanges.length - 1; i > 0; i--) {
+            if (lineNumber >= slideLineRanges[i].start - 1) return i;
+        }
+        return 0;
+    }
+
     // 根据鼠标位置跳转到对应幻灯片
     function getSlideIndexFromMousePosition(e) {
         if (!dom.markdown || slideLineRanges.length === 0) return -1;
@@ -408,22 +419,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 获取点击的行内容
         const clickedLine = lines[lineNumber] || '';
 
-        // 基于分割线计数来确定属于哪个基础幻灯片
-        // 从开头到当前行（包含）统计非代码块中的分割线数量
-        let baseSlideIndex = 0;
-        let inCode = false;
-        for (let i = 0; i <= lineNumber && i < lines.length; i++) {
-            const line = lines[i];
-            if (/^```/.test(line.trim())) inCode = !inCode;
-            if (!inCode && line.trim() === '---') {
-                // 分割线之后才算下一张幻灯片
-                if (i < lineNumber) baseSlideIndex++;
-            }
-        }
-
-        // 防护：边界
-        if (baseSlideIndex < 0) baseSlideIndex = 0;
-        if (baseSlideIndex >= slideLineRanges.length) baseSlideIndex = slideLineRanges.length - 1;
+        // Use the compiled, fence-aware boundaries instead of reparsing with
+        // a legacy backtick toggle.
+        const baseSlideIndex = getBaseSlideIndexByLineNumber(lineNumber);
 
         const range = slideLineRanges[baseSlideIndex];
         if (!range) return -1;
@@ -459,24 +457,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 计算光标所在行号
         const before = text.slice(0, caret);
         const lineNumber = before.split('\n').length - 1;
-        // 计算基础幻灯片索引：统计光标行之前（不含当前行）的分隔符数量（排除代码块内）
-        const lines = text.split('\n');
-        let baseSlideIndex = 0;
-        let inCode = false;
-        for (let i = 0; i < lines.length && i < lineNumber; i++) {
-            const ln = lines[i];
-            if (/^```/.test(ln.trim())) inCode = !inCode;
-            if (!inCode && ln.trim() === '---') {
-                baseSlideIndex++;
-            }
-        }
-        // 若当前行本身是分隔符，则归属于分隔符之后
-        if (lines[lineNumber] && lines[lineNumber].trim() === '---') {
-            baseSlideIndex++;
-        }
-        // 边界保护
-        if (baseSlideIndex < 0) baseSlideIndex = 0;
-        if (baseSlideIndex >= slideLineRanges.length) baseSlideIndex = slideLineRanges.length - 1;
+        // The same fence-aware source ranges used by compileAndRender().
+        const baseSlideIndex = getBaseSlideIndexByLineNumber(lineNumber);
 
         const range = slideLineRanges[baseSlideIndex];
         if (!range) return;
