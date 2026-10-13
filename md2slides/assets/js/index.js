@@ -348,7 +348,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     // dom.preview.addEventListener('keydown', handleKey);
     document.addEventListener('keydown', (e) => {
         const tag = (e.target && e.target.tagName || '').toLowerCase();
-        if (tag === 'textarea' || tag === 'input') return; // ignore while typing
+        if (['textarea', 'input', 'select', 'button'].includes(tag) || e.target?.isContentEditable) return; // don't hijack form controls
         handleKey(e);
     });
 
@@ -1055,36 +1055,38 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     }
     // 新增 renderKaTeX 函数
     // 修改 renderKaTeX 函数，处理块引用中的数学公式
-    function renderKaTeX() {
-        // 使用 requestAnimationFrame 来避免渲染闪烁
+    function renderKaTeX(root = dom.currentSlide) {
+    // Wait for the scheduled DOM mutations, not a fixed number of milliseconds.
+    return new Promise(resolve => {
         requestAnimationFrame(() => {
-            if (typeof renderMathInElement !== 'undefined') {
-                renderMathInElement(dom.currentSlide, {
-                    delimiters: [
-                        { left: '$$', right: '$$', display: true },
-                        { left: '$', right: '$', display: false },
-                        { left: '\\(', right: '\\)', display: false },
-                        { left: '\\[', right: '\\]', display: true }
-                    ],
-                    throwOnError: false,
-                    errorColor: '#ff5252'
-                });
+            try {
+                if (typeof renderMathInElement !== 'undefined') {
+                    renderMathInElement(root, {
+                        delimiters: [
+                            { left: '$$', right: '$$', display: true },
+                            { left: '$', right: '$', display: false },
+                            { left: '\\(', right: '\\)', display: false },
+                            { left: '\\[', right: '\\]', display: true }
+                        ],
+                        throwOnError: false,
+                        errorColor: '#ff5252'
+                    });
+                }
+                if (typeof hljs !== 'undefined') {
+                    root.querySelectorAll('pre.code code').forEach(block => {
+                        if (!block.classList.contains('hljs')) hljs.highlightElement(block);
+                    });
+                }
+                Promise.resolve(renderMermaid(root)).catch(error => {
+                    console.warn('Slide diagram rendering failed', error);
+                }).finally(resolve);
+            } catch (error) {
+                console.warn('Slide rendering failed', error);
+                resolve();
             }
-
-            // 渲染代码高亮
-            if (typeof hljs !== 'undefined') {
-                dom.currentSlide.querySelectorAll('pre.code code').forEach((block) => {
-                    // 如果已经高亮过，跳过
-                    if (!block.classList.contains('hljs')) {
-                        hljs.highlightElement(block);
-                    }
-                });
-            }
-
-            // 渲染 Mermaid
-            renderMermaid();
         });
-    }
+    });
+}
 
     function splitSlides(text) {
         const lines = (text || '').replace(/\r/g, '').split('\n');
@@ -1502,46 +1504,82 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         return align ? ` align="${align}"` : '';
     }
 
-    // Mermaid 渲染
-    let mermaidInited = false;
-    let mermaidLoading = false;
-    function renderMermaid() {
-        if (typeof mermaid === 'undefined') {
-            if (mermaidLoading) return;
-            mermaidLoading = true;
-            const s = document.createElement('script');
-            s.src = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js';
-            s.onload = () => { mermaidLoading = false; renderMermaid(); };
-            s.onerror = () => { mermaidLoading = false; console.warn('mermaid load failed'); };
-            document.head.appendChild(s);
+    // Mermaid rendering is async; export must await all diagram callbacks.
+    let mermaidScriptPromise = null;
+    let mermaidRenderSequence = 0;
+    const pendingMermaidRenders = new WeakMap();
+
+    function renderMermaid(root = dom.currentSlide) {
+        const existing = pendingMermaidRenders.get(root);
+        if (existing) {
+            // A new slide can replace the same root while the old render is pending.
+            if (root.querySelector('.mermaid')) return existing.then(() => renderMermaid(root));
+            return existing;
+        }
+        const blocks = Array.from(root.querySelectorAll('.mermaid'));
+        if (!blocks.length) return Promise.resolve();
+
+        const job = renderMermaidBlocks(blocks);
+        pendingMermaidRenders.set(root, job);
+        const clear = () => {
+            if (pendingMermaidRenders.get(root) === job) pendingMermaidRenders.delete(root);
+        };
+        job.then(clear, clear);
+        return job;
+    }
+
+    async function renderMermaidBlocks(blocks) {
+    if (typeof mermaid === 'undefined') {
+        if (!mermaidScriptPromise) {
+            mermaidScriptPromise = new Promise(resolve => {
+                const script = document.createElement('script');
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js';
+                script.onload = () => resolve(true);
+                script.onerror = () => resolve(false);
+                document.head.appendChild(script);
+            });
+        }
+        const loaded = await mermaidScriptPromise;
+        if (!loaded || typeof mermaid === 'undefined') {
+            console.warn('Mermaid failed to load');
             return;
         }
-        const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
-        if (!mermaidInited) {
-            mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
-            mermaidInited = true;
-        } else {
-            mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
-        }
-        const blocks = dom.currentSlide.querySelectorAll('.mermaid');
-        blocks.forEach((el, idx) => {
-            // 如果已经渲染过（有 mermaid-render 父元素），跳过
-            if (el.parentElement && el.parentElement.classList.contains('mermaid-render')) {
-                return;
-            }
-            const code = (el.textContent || '').trim();
-            const id = `mmd-${Date.now()}-${idx}`;
-            const container = document.createElement('div');
-            container.className = 'mermaid-render';
-            el.replaceWith(container);
-            try {
-                mermaid.render(id, code, (svg) => { container.innerHTML = svg; });
-            } catch (e) {
-                console.warn('mermaid render failed', e);
-                container.innerHTML = `<pre class="code"><code>${escapeHtml(code)}</code></pre>`;
-            }
-        });
     }
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
+    mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
+    await Promise.all(blocks.map(el => new Promise(resolve => {
+        const code = (el.textContent || '').trim();
+        const id = `mmd-export-${++mermaidRenderSequence}`;
+        const container = document.createElement('div');
+        container.className = 'mermaid-render';
+        el.replaceWith(container);
+        let done = false;
+        const finish = svg => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            container.innerHTML = svg;
+            resolve();
+        };
+        const fallback = error => {
+            if (done) return;
+            done = true;
+            clearTimeout(timeout);
+            console.warn('Mermaid render failed', error);
+            container.innerHTML = `<pre class="code"><code>${escapeHtml(code)}</code></pre>`;
+            resolve();
+        };
+        // A broken Mermaid callback must not stall PDF export indefinitely.
+        const timeout = setTimeout(() => fallback(new Error('Mermaid render timed out')), 10000);
+        try {
+            const result = mermaid.render(id, code, finish);
+            if (typeof result === 'string') finish(result);
+            else if (result && typeof result.catch === 'function') result.catch(fallback);
+        } catch (error) {
+            fallback(error);
+        }
+    })));
+}
 
     // 将 > [!TYPE] ... 转换为提示块占位符
     function transformAdmonitions(src) {
@@ -1761,6 +1799,52 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     function unescapeMdLink(s) {
         return s.replace(/\((?=.*\))/g, '%28').replace(/\)/g, '%29');
     }
+    function waitForExportAssets(root, timeoutMs = 12000) {
+    const images = Array.from(root.querySelectorAll('img')).map(img => {
+        const loaded = img.complete ? Promise.resolve() : new Promise(resolve => {
+            img.addEventListener('load', resolve, { once: true });
+            img.addEventListener('error', resolve, { once: true });
+        });
+        return loaded.then(() => {
+            if (typeof img.decode === 'function' && img.naturalWidth) {
+                return img.decode().catch(() => {});
+            }
+        });
+    });
+    const fonts = document.fonts ? document.fonts.ready.catch(() => {}) : Promise.resolve();
+    return new Promise(resolve => {
+        const timeout = setTimeout(resolve, timeoutMs);
+        Promise.allSettled([fonts, ...images]).then(() => {
+            clearTimeout(timeout);
+            resolve();
+        });
+    });
+}
+
+    function waitForPrintToFinish() {
+    return new Promise((resolve, reject) => {
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            clearTimeout(timeout);
+            window.removeEventListener('afterprint', finish);
+            resolve();
+        };
+        // Some browsers don't dispatch afterprint. Cleanup eventually, but
+        // never destroy the printable DOM immediately after window.print().
+        const timeout = setTimeout(finish, 30000);
+        window.addEventListener('afterprint', finish, { once: true });
+        try {
+            window.print();
+        } catch (error) {
+            clearTimeout(timeout);
+            window.removeEventListener('afterprint', finish);
+            reject(error);
+        }
+    });
+}
+
     async function handleExport(type, btn) {
         if (exportingPdf) return; // 已在导出中，直接忽略
         exportingPdf = true;
@@ -1802,27 +1886,26 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             keyboard: null,
             touch: null,
         };
+        const previousInteractionStates = new Map();
+        const lockElement = el => {
+            if (!previousInteractionStates.has(el)) {
+                previousInteractionStates.set(el, {
+                    disabled: 'disabled' in el ? el.disabled : null,
+                    pointerEvents: el.style.pointerEvents,
+                    cursor: el.style.cursor,
+                    marker: el.getAttribute('data-export-disabled')
+                });
+            }
+            el.setAttribute('data-export-disabled', 'true');
+            if ('disabled' in el) el.disabled = true;
+            el.style.pointerEvents = 'none';
+            el.style.cursor = 'not-allowed';
+        };
 
         const disableInteractions = () => {
-            // 禁用所有输入框、按钮、选择框
-            document.querySelectorAll('input, textarea, select, button').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.disabled = true;
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
-            // 禁用所有链接和可点击元素
-            document.querySelectorAll('a, [onclick], [role="button"]').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
-            // 禁用所有导航按钮
-            document.querySelectorAll('.nav-btn, .control-btn, .control-input').forEach(el => {
-                el.setAttribute('data-export-disabled', 'true');
-                el.style.pointerEvents = 'none';
-                el.style.cursor = 'not-allowed';
-            });
+            // Preserve pre-existing disabled/pointer state (including task-list checkboxes).
+            document.querySelectorAll('input, textarea, select, button, a, [onclick], [role="button"], .nav-btn, .control-btn, .control-input')
+                .forEach(lockElement);
 
             // 禁用鼠标事件（点击、拖拽等）
             handlers.mouse = (e) => {
@@ -1866,15 +1949,14 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
         // 恢复所有交互元素
         const enableInteractions = () => {
-            // 恢复所有输入框 / 按钮等
-            document.querySelectorAll('[data-export-disabled="true"]').forEach(el => {
-                el.removeAttribute('data-export-disabled');
-                if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.tagName === 'BUTTON') {
-                    el.disabled = false;
-                }
-                el.style.pointerEvents = '';
-                el.style.cursor = '';
+            previousInteractionStates.forEach((state, el) => {
+                if (state.marker === null) el.removeAttribute('data-export-disabled');
+                else el.setAttribute('data-export-disabled', state.marker);
+                if (state.disabled !== null) el.disabled = state.disabled;
+                el.style.pointerEvents = state.pointerEvents;
+                el.style.cursor = state.cursor;
             });
+            previousInteractionStates.clear();
 
             // 移除鼠标事件监听
             if (handlers.mouse) {
@@ -1910,6 +1992,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         // 禁用交互
         disableInteractions();
 
+        let activeRasterContainer = null;
+        let printContainer = null;
+        const originalOverflow = document.body.style.overflow;
         try {
             compileAndRender();
             const realStage = document.getElementById("stage");
@@ -1939,8 +2024,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
                 for (let i = 0; i < slides.length; i++) {
                     realStage.querySelector("#currentSlide").innerHTML = slides[i];
-                    renderKaTeX();
-                    await new Promise(r => setTimeout(r, 120));
+                    await renderKaTeX();
+                    await waitForExportAssets(realStage.querySelector('#currentSlide'));
 
                     const cloneStage = realStage.cloneNode(true);
 
@@ -1970,6 +2055,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
                     container.appendChild(cloneStage);
                     document.body.appendChild(container);
+                    activeRasterContainer = container;
+                    // Cloned images may start a fresh network request.
+                    await waitForExportAssets(container);
 
                     const canvas = await html2canvas(container, {
                         useCORS: true,
@@ -1999,6 +2087,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                         }
                     });
                     container.remove();
+                    activeRasterContainer = null;
                 }
 
                 realStage.querySelector("#currentSlide").innerHTML = originalHTML;
@@ -2007,14 +2096,14 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             } else if (type === 'vector') {
                 document.getElementById('export-msg-sub').textContent = "Preparing print window... Please manually select 'Save as PDF' from the dialog.";
 
-                const printContainer = document.createElement("div");
+                printContainer = document.createElement("div");
                 printContainer.id = "print-container";
                 document.body.appendChild(printContainer);
 
                 for (let i = 0; i < slides.length; i++) {
                     realStage.querySelector("#currentSlide").innerHTML = slides[i];
-                    renderKaTeX();
-                    await new Promise(r => setTimeout(r, 120));
+                    await renderKaTeX();
+                    await waitForExportAssets(realStage.querySelector('#currentSlide'));
 
                     const cloneStage = realStage.cloneNode(true);
 
@@ -2050,24 +2139,38 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                     innerWrapper.appendChild(cloneStage);
                     page.appendChild(innerWrapper);
                     printContainer.appendChild(page);
+                    // Wait for resources in the actual printable DOM as well.
+                    await waitForExportAssets(page);
                 }
 
                 realStage.querySelector("#currentSlide").innerHTML = originalHTML;
-                compileAndRender();
-                await new Promise(r => setTimeout(r, 500));
 
                 const oldTitle = document.title;
-                document.title = "slides";
-                window.print();
-                document.title = oldTitle;
-                printContainer.remove();
+                try {
+                    document.title = "slides";
+                    await waitForPrintToFinish();
+                } finally {
+                    document.title = oldTitle;
+                }
             }
 
-            compileAndRender();
         } catch (err) {
             console.error('导出 PDF 失败', err);
+            const error = document.createElement('div');
+            error.setAttribute('role', 'alert');
+            error.textContent = 'PDF export failed: ' + (err?.message || String(err));
+            error.style.cssText = 'position:fixed;bottom:24px;left:24px;z-index:100000;padding:12px 18px;border-radius:8px;background:#7f1d1d;color:white;max-width:80vw;';
+            document.body.appendChild(error);
+            setTimeout(() => error.remove(), 8000);
         } finally {
-            enableInteractions();
+            activeRasterContainer?.remove();
+            printContainer?.remove();
+            try {
+                compileAndRender();
+            } finally {
+                enableInteractions();
+                document.body.style.overflow = originalOverflow;
+            }
             if (overlay && overlay.parentNode) {
                 overlay.parentNode.removeChild(overlay);
             }

@@ -16,6 +16,6 @@ npx playwright install chromium
 npm test
 ```
 
-The browser tests cover nested `\\pause`, Markdown link parsing, Mermaid/URL HTML safety, image-only progressive steps, and empty-draft persistence. Tests stub CDN dependencies so that they can run without external asset requests.
+The browser tests cover nested `\\pause`, Markdown link parsing, Mermaid/URL HTML safety, image-only progressive steps, and empty-draft persistence, and PDF export lifecycle handling. Tests stub CDN dependencies so that they can run without external asset requests.
 
-PDF export currently has separate render and print pipelines; see future work to await images, fonts, and Mermaid completion before exporting.
+PDF export waits for Mermaid render callbacks, images and fonts before capturing pages. Print export keeps the printable DOM until `afterprint` (with a fallback timeout). If an export fails, an error message is shown and editor controls are restored. Rendering is still browser-dependent; verify the exported document before presenting.
