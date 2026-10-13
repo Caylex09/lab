@@ -34,7 +34,7 @@ test('manual pause hides later siblings in nested lists', async ({ page }) => {
 test('URLs with underscores survive inline parsing', async ({ page }) => {
   await page.locator('#paginationMode').selectOption('manual');
   await page.locator('#markdownInput').fill('[link](https://example.com/a_b_c)');
-  await expect(page.locator('#currentSlide a')).toHaveAttribute('href', 'https://example.com/a_b_c');
+  await expect(page.locator('#currentSlide a[href="https://example.com/a_b_c"]')).toHaveCount(1);
 });
 
 test('Mermaid source and relative URLs cannot inject HTML attributes', async ({ page }) => {
