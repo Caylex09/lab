@@ -21,8 +21,10 @@ test.beforeEach(async ({ page }) => {
 
 test('manual pause hides later siblings in nested lists', async ({ page }) => {
   await page.locator('#paginationMode').selectOption('manual');
-  await page.locator('#markdownInput').fill('## Intro\\n- First \\pause\\n- Second');
+  await page.locator('#markdownInput').fill('## Intro\n- First \\pause\n- Second');
   await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
   await expect(page.locator('#currentSlide')).toContainText('First');
   await expect(page.locator('#currentSlide')).not.toContainText('Second');
   await page.locator('#nextBtn').evaluate(el => el.click());
@@ -44,7 +46,7 @@ test('Mermaid source and relative URLs cannot inject HTML attributes', async ({ 
     '```',
     '',
     '[link](/safe"onclick="window.injected=1)',
-  ].join('\\n');
+  ].join('\n');
   await page.locator('#markdownInput').fill(md);
   await expect(page.locator('#currentSlide a')).toHaveCount(1);
   await expect(page.locator('#currentSlide a[onclick]')).toHaveCount(0);
@@ -55,8 +57,10 @@ test('Mermaid source and relative URLs cannot inject HTML attributes', async ({ 
 
 test('image-only paragraphs take a progressive step', async ({ page }) => {
   await page.locator('#paginationMode').selectOption('auto');
-  await page.locator('#markdownInput').fill('## Intro\\n\\n![image](/missing.png)');
+  await page.locator('#markdownInput').fill('## Intro\n\n![image](/missing.png)');
   await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
   await expect(page.locator('#currentSlide img')).toHaveCount(0);
   await page.locator('#nextBtn').evaluate(el => el.click());
   await expect(page.locator('#currentSlide img')).toHaveCount(1);
