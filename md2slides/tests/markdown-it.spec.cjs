@@ -89,3 +89,25 @@ test('Math and Mermaid are distinct child blocks inside a task list', async ({ p
   await expect(tasks.first().locator(':scope > .mermaid-render svg')).toHaveCount(1);
   await expect(tasks.nth(1).locator('input[type="checkbox"]')).toBeChecked();
 });
+
+
+test('fenced code keeps escaped pipes literally rather than treating them as table syntax', async ({ page }) => {
+  const fence = String.fromCharCode(96).repeat(3);
+  const source = String.raw`const literal = "\|";`;
+  await page.locator('#markdownInput').fill([
+    fence + 'js',
+    source,
+    fence
+  ].join('\n'));
+  await expect(page.locator('#currentSlide pre.code code')).toHaveText(source);
+});
+
+test('display math preserves TeX escaped vertical bars', async ({ page }) => {
+  const formula = String.raw`\|x\|`;
+  await page.locator('#markdownInput').fill([
+    '$$',
+    formula,
+    '$$'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide .katex-display-wrapper')).toContainText(formula);
+});
