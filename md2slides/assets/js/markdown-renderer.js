@@ -120,6 +120,26 @@
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
         for (let i = start + 1; i < src.length && src[i] !== '\n'; i++) {
             if (src[i] === '\\') { i++; continue; }
+            if (src[i] === '\x60') {
+                // Skip matched inline code: its dollar signs cannot close math.
+                const begin = i;
+                while (src[i] === '\x60') i++;
+                const markerLength = i - begin;
+                let afterClose = -1;
+                for (let at = i; at < src.length && src[at] !== '\n';) {
+                    if (src[at] !== '\x60') { at++; continue; }
+                    let end = at;
+                    while (src[end] === '\x60') end++;
+                    if (end - at === markerLength) {
+                        afterClose = end;
+                        break;
+                    }
+                    at = end;
+                }
+                if (afterClose >= 0) i = afterClose - 1;
+                else i--;
+                continue;
+            }
             if (src[i] === '$' && src[i + 1] !== '$') return i;
         }
         return -1;
