@@ -232,7 +232,12 @@
             if (token.type === 'list_item_open') items.push({ open: token, list: lists[lists.length - 1], seen: false });
             if (token.type === 'list_item_close') items.pop();
 
-            if (token.type === 'paragraph_open' && items.length && tokens[i + 1]?.type === 'inline') {
+            // Markdown-it provides the exact token nesting depth. A task or
+            // continuation belongs only to paragraphs that are direct children
+            // of the current <li>, never to nested quotes or other containers.
+            if (token.type === 'paragraph_open' && items.length &&
+                token.level === items[items.length - 1].open.level + 1 &&
+                tokens[i + 1]?.type === 'inline') {
                 const item = items[items.length - 1], inline = tokens[i + 1];
                 const firstParagraph = !item.seen;
                 if (!firstParagraph) {
