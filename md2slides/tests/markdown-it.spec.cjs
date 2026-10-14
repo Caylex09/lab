@@ -391,3 +391,57 @@ test('autolink dollars do not prevent real math from closing afterwards', async 
   await expect(cells.nth(1)).toContainText('$a');
   await expect(cells.nth(1)).toContainText('+ b$');
 });
+
+
+test('single-label email autolink does not close table math or shift cells', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | <cost$offer@example> | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.first()).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'mailto:cost$offer@example');
+  await expect(cells.last()).toHaveText('last');
+});
+
+test('ordered list markers stay literal rather than becoming task checkboxes', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '1. [ ] Keep literal',
+    '2. [x] Also literal'
+  ].join('\n'));
+  const list = page.locator('#currentSlide > ol');
+  await expect(list.locator(':scope > li')).toHaveCount(2);
+  await expect(list.locator(':scope > li').first()).toContainText('[ ] Keep literal');
+  await expect(list.locator(':scope > li').nth(1)).toContainText('[x] Also literal');
+  await expect(list.locator('input[type="checkbox"], li.task-item')).toHaveCount(0);
+});
+
+test('a bullet list continuation beginning with [ ] is not a new task', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- First',
+    '',
+    '  [ ] This is explanatory text',
+    '- Next'
+  ].join('\n'));
+  const first = page.locator('#currentSlide > ul > li').first();
+  await expect(first.locator(':scope > p.list-continuation')).toHaveText('[ ] This is explanatory text');
+  await expect(page.locator('#currentSlide ul.task-list, #currentSlide li.task-item')).toHaveCount(0);
+  await expect(page.locator('#currentSlide input[type="checkbox"]')).toHaveCount(0);
+});
+
+test('nested bullet tasks still render while ordered tasks remain literal', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  - [x] Child task',
+    '  - [ ] Pending child',
+    '1. [ ] Ordered label'
+  ].join('\n'));
+  const nested = page.locator('#currentSlide > ul > li > ul.task-list');
+  await expect(nested.locator(':scope > li.task-item')).toHaveCount(2);
+  await expect(nested.locator('input[type="checkbox"]').first()).toBeChecked();
+  const ordered = page.locator('#currentSlide > ol > li');
+  await expect(ordered).toHaveText('[ ] Ordered label');
+  await expect(ordered.locator('input[type="checkbox"]')).toHaveCount(0);
+});
