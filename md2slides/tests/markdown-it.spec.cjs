@@ -240,3 +240,45 @@ test('ordinary tab-indented blocks still parse as code, not prose', async ({ pag
   await expect(slide.locator(':scope > p')).toHaveText('Intro');
   await expect(slide.locator(':scope > p')).not.toContainText('const x = 1');
 });
+
+
+test('an unmatched dollar cannot close inside a later inline-code table cell', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | ' + tick + 'x$y' + tick + ' | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('code')).toHaveText('x$y');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('double-backtick code spans do not close earlier dollar math in tables', async ({ page }) => {
+  const ticks = String.fromCharCode(96).repeat(2);
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | ' + ticks + 'x $ y' + ticks + ' | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('code')).toHaveText('x $ y');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('a real math closer after code still preserves all formula content', async ({ page }) => {
+  const ticks = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '| Name | Expression |',
+    '| --- | --- |',
+    '| x | $x' + ticks + 'y$z' + ticks + '+1$ |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.nth(1)).toContainText('$x');
+  await expect(cells.nth(1)).toContainText('+1$');
+});
