@@ -624,7 +624,10 @@ test('render-time safety check still allows ordinary HTTPS links and images', as
     '![diagram](https://example.com/diagram.png)'
   ].join('\n'));
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator('a')).toHaveAttribute('href', 'https://example.com/manual');
-  await expect(slide.locator('img')).toHaveAttribute('src', 'https://example.com/diagram.png');
-  await expect(slide.locator('img')).toHaveAttribute('alt', 'diagram');
+  // Wait for the editor to replace its initial welcome slide.
+  const link = slide.locator('a[href="https://example.com/manual"]');
+  await expect(link).toHaveCount(1);
+  const image = slide.locator('img[src="https://example.com/diagram.png"]');
+  await expect(image).toHaveCount(1);
+  await expect(image).toHaveAttribute('alt', 'diagram');
 });
