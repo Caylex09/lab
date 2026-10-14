@@ -115,18 +115,30 @@
     });
     md.renderer.rules.slide_pause = () => '<span class="pause-marker" data-pause="true"></span>';
 
+    // Keep dollar-delimited TeX opaque to Markdown escapes and pause tokens.
+    const closingDollar = (src, start) => {
+        if (src[start] !== '$' || src[start + 1] === '$') return -1;
+        for (let i = start + 1; i < src.length && src[i] !== '\n'; i++) {
+            if (src[i] === '\\') { i++; continue; }
+            if (src[i] === '$' && src[i + 1] !== '$') return i;
+        }
+        return -1;
+    };
     md.inline.ruler.before('escape', 'slide_inline_math', (state, silent) => {
         const start = state.src.slice(state.pos);
-        const left = start.startsWith('\\(') ? '\\(' : start.startsWith('\\[') ? '\\[' : null;
+        const left = start.startsWith('\\(') ? '\\(' :
+            start.startsWith('\\[') ? '\\[' :
+            start.startsWith('$') && !start.startsWith('$$') ? '$' : null;
         if (!left) return false;
-        const right = left === '\\(' ? '\\)' : '\\]';
-        const end = state.src.indexOf(right, state.pos + 2);
-        if (end === -1) return false;
+        const right = left === '\\(' ? '\\)' : left === '\\[' ? '\\]' : '$';
+        const end = left === '$' ? closingDollar(state.src, state.pos) :
+            state.src.indexOf(right, state.pos + left.length);
+        if (end < 0) return false;
         if (!silent) {
             const token = state.push('slide_inline_math', '', 0);
-            token.content = state.src.slice(state.pos, end + 2);
+            token.content = state.src.slice(state.pos, end + right.length);
         }
-        state.pos = end + 2;
+        state.pos = end + right.length;
         return true;
     });
     md.renderer.rules.slide_inline_math = (tokens, idx) => escape(tokens[idx].content);
