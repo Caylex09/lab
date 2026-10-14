@@ -331,6 +331,15 @@
             }
             let protectedLine = '';
             for (let i = 0; i < line.length;) {
+                if (line[i] === '$') {
+                    const end = closingDollar(line, i);
+                    if (end > i) {
+                        // Do not strip TeX backslashes inside a formula.
+                        protectedLine += line.slice(i, end + 1).replace(/\|/g, PIPE);
+                        i = end + 1;
+                        continue;
+                    }
+                }
                 if (line[i] === '\x60') {
                     let start = i;
                     while (line[i] === '\x60') i++;
