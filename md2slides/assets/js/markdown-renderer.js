@@ -6,6 +6,11 @@
     'use strict';
     const md = window.markdownit({ html: false, linkify: false, breaks: false });
     const escape = md.utils.escapeHtml;
+    // Let markdown-it parse links/images even when the destination scheme is
+    // forbidden. The renderer below is the single URL-safety enforcement
+    // point: links become plain text, images become escaped alt text. Without
+    // this, markdown-it rejects unsafe URLs before we can recover image alt.
+    md.validateLink = () => true;
 
     // Preserve the previous link-protocol allowlist, not just markdown-it's
     // default blacklist. Never emit half an anchor for a rejected link.
