@@ -523,3 +523,78 @@ test('a first fenced block prevents a later paragraph from becoming a task', asy
   await expect(item.locator('input[type="checkbox"]')).toHaveCount(0);
   await expect(item).not.toHaveClass(/task-item/);
 });
+
+
+test('resolved reference-style links with dollars do not swallow table cells', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | [price][cost$offer] | last |',
+    '',
+    '[cost$offer]: https://example.com/pricing'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/pricing');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('shortcut and collapsed reference links use upstream reference definitions', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | [cost$offer] | last |',
+    '| $6 | [cost$offer][] | more |',
+    '',
+    '[cost$offer]: https://example.com/pricing'
+  ].join('\n'));
+  const rows = page.locator('#currentSlide table.md-table tbody tr');
+  await expect(rows).toHaveCount(2);
+  for (const [index, price, ending] of [[0, '$5', 'last'], [1, '$6', 'more']]) {
+    await expect(rows.nth(index).locator('td')).toHaveCount(3);
+    await expect(rows.nth(index).locator('td').first()).toHaveText(price);
+    await expect(rows.nth(index).locator('td').nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/pricing');
+    await expect(rows.nth(index).locator('td').last()).toHaveText(ending);
+  }
+});
+
+test('a list-item reference definition cannot turn later prose into a checkbox', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [ref]: /target',
+    '',
+    '  [ ] later text'
+  ].join('\n'));
+  const item = page.locator('#currentSlide > ul > li');
+  await expect(item).toContainText('[ ] later text');
+  await expect(item.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(item).not.toHaveClass(/task-item/);
+});
+
+test('a real leading task checkbox still renders next to reference definitions', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [x] Task',
+    '- ordinary',
+    '',
+    '[ref]: /target'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first().locator('input[type="checkbox"]')).toBeChecked();
+  await expect(items.last().locator('input[type="checkbox"]')).toHaveCount(0);
+});
+
+test('rejected image protocols keep escaped alt text without any img element', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '![diagram](ftp://host/image.png)',
+    '',
+    '![**warning**](javascript:alert(1))',
+    '',
+    '![<img src=x onerror=alert(1)>](ftp://host/image.png)'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide).toContainText('diagram');
+  await expect(slide).toContainText('warning');
+  await expect(slide).toContainText('<img src=x onerror=alert(1)>');
+  await expect(slide.locator('img, script')).toHaveCount(0);
+});
