@@ -282,3 +282,73 @@ test('a real math closer after code still preserves all formula content', async 
   await expect(cells.nth(1)).toContainText('$x');
   await expect(cells.nth(1)).toContainText('+1$');
 });
+
+
+test('nested unordered fenced code retains the original leading tab', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- item',
+    '  ~~~',
+    '\tfoo()',
+    '  ~~~',
+    '- sibling'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first().locator(':scope > pre.code code')).toHaveText('\tfoo()');
+});
+
+test('wide ordered list markers keep tabbed fences inside their list items', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '100. item',
+    '  ~~~javascript',
+    '\tfoo()',
+    '  ~~~',
+    '101. sibling'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ol > li');
+  await expect(items).toHaveCount(2);
+  await expect(page.locator('#currentSlide > ol')).toHaveAttribute('start', '100');
+  await expect(items.first().locator(':scope > pre.code code')).toHaveText('\tfoo()');
+});
+
+test('deep nested fenced code retains its literal tab and list ownership', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  - Child',
+    '    ~~~',
+    '\tfoo()',
+    '    ~~~',
+    '- Sibling'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first().locator(':scope > ul > li > pre.code code')).toHaveText('\tfoo()');
+});
+
+test('dollar signs inside link destinations do not merge table cells', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | [price](https://example.com/$offer) | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('image destinations and nested URL parentheses cannot close a preceding dollar', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| A | B | C |',
+    '| --- | --- | --- |',
+    '| $5 | ![price](https://example.com/asset$offer.png) | last |',
+    '| $6 | [price](https://example.com/($offer)) | after |'
+  ].join('\n'));
+  const rows = page.locator('#currentSlide table.md-table tbody tr');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.first().locator('td')).toHaveCount(3);
+  await expect(rows.first().locator('td').nth(1).locator('img')).toHaveAttribute('alt', 'price');
+  await expect(rows.nth(1).locator('td')).toHaveCount(3);
+  await expect(rows.nth(1).locator('td').last()).toHaveText('after');
+});
