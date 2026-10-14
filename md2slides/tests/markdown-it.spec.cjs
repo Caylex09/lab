@@ -494,3 +494,32 @@ test('blockquote paragraphs are not split into list-continuation paragraphs', as
   await expect(quote).toContainText('quoted second line');
   await expect(quote.locator('p.list-continuation')).toHaveCount(0);
 });
+
+
+test('a first blockquote prevents later direct paragraphs from becoming tasks', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- > Quote comes first',
+    '',
+    '  [ ] This must stay text'
+  ].join('\n'));
+  const item = page.locator('#currentSlide > ul > li');
+  await expect(item.locator(':scope > blockquote')).toContainText('Quote comes first');
+  await expect(item.locator(':scope > p')).toHaveText('[ ] This must stay text');
+  await expect(item.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(item).not.toHaveClass(/task-item/);
+});
+
+test('a first fenced block prevents a later paragraph from becoming a task', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- ~~~',
+    '  code body',
+    '  ~~~',
+    '',
+    '  [x] This must stay text'
+  ].join('\n'));
+  const item = page.locator('#currentSlide > ul > li');
+  await expect(item.locator(':scope > pre.code code')).toHaveText('code body');
+  await expect(item.locator(':scope > p')).toHaveText('[x] This must stay text');
+  await expect(item.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(item).not.toHaveClass(/task-item/);
+});
