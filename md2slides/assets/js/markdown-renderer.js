@@ -241,7 +241,7 @@
                 const before = frames[frames.length - 1];
                 // Existing editor treats two blank lines as separate lists.
                 if (blankCount >= 2 && depth === 0 && before)
-                    output.splice(output.length - 1, 0, '**************');
+                    output.splice(output.length - 1, 0, '\uE030');
                 while (frames.length && frames[frames.length - 1].depth >= depth) frames.pop();
                 const parent = frames[frames.length - 1];
                 const target = parent && depth ? parent.target + parent.width : depth * 2;
@@ -371,8 +371,20 @@
         return output.join('\n');
     }
 
-    md.renderer.rules.hr = (tokens, idx, options, env, self) =>
-        tokens[idx].markup === '**************' ? '' : self.renderToken(tokens, idx, options);
+    // This invisible synthetic boundary is created only for legacy double-
+    // blank-line list breaks. A block rule interrupts CommonMark lists without
+    // suppressing a user's actual thematic break (such as asterisks).
+    md.block.ruler.before('paragraph', 'slide_list_boundary', (state, start, end, silent) => {
+        const line = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]);
+        if (line.trim() !== '\uE030') return false;
+        if (!silent) {
+            const token = state.push('slide_list_boundary', '', 0);
+            token.block = true;
+        }
+        state.line = start + 1;
+        return true;
+    }, { alt: ['paragraph', 'list'] });
+    md.renderer.rules.slide_list_boundary = () => '';
 
     window.md2slidesMarkdown = {
         render: source => md.render(protectTablePipes(protectDisplayMath(normalizeListMarkers(source))))
