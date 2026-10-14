@@ -352,3 +352,42 @@ test('image destinations and nested URL parentheses cannot close a preceding dol
   await expect(rows.nth(1).locator('td')).toHaveCount(3);
   await expect(rows.nth(1).locator('td').last()).toHaveText('after');
 });
+
+
+test('angle-bracket URL autolinks with dollar signs keep table columns separate', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | <https://example.com/$offer> | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('email autolinks with dollars do not close unmatched inline math', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| $5 | <cost$offer@example.com> | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'mailto:cost$offer@example.com');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('autolink dollars do not prevent real math from closing afterwards', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Name | Expression |',
+    '| --- | --- |',
+    '| x | $a <https://example.com/$offer> + b$ |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.nth(1)).toContainText('$a');
+  await expect(cells.nth(1)).toContainText('+ b$');
+});
