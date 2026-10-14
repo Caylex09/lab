@@ -208,9 +208,10 @@ test('parenthesized TeX preserves escaped pipes in paragraphs and table cells', 
     '| One | ' + formula + ' |'
   ].join('\n'));
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator(':scope > p')).toContainText(formula);
   const table = slide.locator('table.md-table');
+  // Wait for the editor's asynchronous preview update before reading paragraphs.
   await expect(table.locator('tbody td')).toHaveCount(2);
+  await expect(slide.locator(':scope > p')).toContainText(formula);
   await expect(table.locator('tbody td').last()).toHaveText(formula);
 });
 
@@ -234,7 +235,8 @@ test('ordinary tab-indented blocks still parse as code, not prose', async ({ pag
     '\tconst x = 1'
   ].join('\n'));
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator(':scope > p')).toHaveText('Intro');
+  // Await the new code block so we don't inspect the initial welcome content.
   await expect(slide.locator(':scope > pre.code code')).toHaveText('const x = 1');
+  await expect(slide.locator(':scope > p')).toHaveText('Intro');
   await expect(slide.locator(':scope > p')).not.toContainText('const x = 1');
 });
