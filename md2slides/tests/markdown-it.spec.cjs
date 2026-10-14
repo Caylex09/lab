@@ -196,3 +196,45 @@ test('display math containing literal tilde fence lines is not cut short', async
   await expect(formula).toContainText('~~~~~~~');
   await expect(page.locator('#currentSlide pre.code')).toHaveCount(0);
 });
+
+
+test('parenthesized TeX preserves escaped pipes in paragraphs and table cells', async ({ page }) => {
+  const formula = '\\(x\\|y\\)';
+  await page.locator('#markdownInput').fill([
+    'Formula: ' + formula,
+    '',
+    '| Item | Expression |',
+    '| --- | --- |',
+    '| One | ' + formula + ' |'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toContainText(formula);
+  const table = slide.locator('table.md-table');
+  await expect(table.locator('tbody td')).toHaveCount(2);
+  await expect(table.locator('tbody td').last()).toHaveText(formula);
+});
+
+test('escaped currency dollar signs cannot swallow Markdown table columns', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Cost | Note | Label |',
+    '| --- | --- | --- |',
+    '| \\$5 | middle $ value | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText('$5');
+  await expect(cells.nth(1)).toHaveText('middle $ value');
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('ordinary tab-indented blocks still parse as code, not prose', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    'Intro',
+    '',
+    '\tconst x = 1'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText('Intro');
+  await expect(slide.locator(':scope > pre.code code')).toHaveText('const x = 1');
+  await expect(slide.locator(':scope > p')).not.toContainText('const x = 1');
+});
