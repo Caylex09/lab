@@ -281,12 +281,22 @@
         for (const line of source.split('\n')) {
             const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
             if (fence) {
-                // Leave a fenced code body byte-for-byte intact except for
-                // indentation added to nest the whole fence in its owning item.
-                output.push(fence.offset > 0 ? ' '.repeat(fence.offset) + line : line);
-                if (marker && marker[1][0] === fence.char &&
+                const isClosing = marker && marker[1][0] === fence.char &&
                     marker[1].length >= fence.size &&
-                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
+                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line);
+                if (isClosing) {
+                    // Align the closer with the transformed opening marker,
+                    // rather than indenting it like a literal code-body line.
+                    output.push(fence.ownerIndent ? padLine(line, fence.offset) : line);
+                    fence = null;
+                } else {
+                    // markdown-it removes an owning list item's entire content
+                    // indentation from fenced lines. Supply that exact prefix
+                    // separately, so the following raw bytes (including tabs)
+                    // survive untouched inside the final <code> element.
+                    output.push(fence.ownerIndent ?
+                        ' '.repeat(fence.ownerIndent) + line : line);
+                }
                 continue;
             }
             if (!line.trim()) {
@@ -325,7 +335,8 @@
                 // Preserve root-level Tab indentation used by CommonMark code blocks.
                 output.push(owner ? padLine(line, offset) : line);
                 if (!indent(line) && !marker) frames.length = 0;
-                if (marker) fence = { char: marker[1][0], size: marker[1].length, offset };
+                if (marker) fence = { char: marker[1][0], size: marker[1].length,
+                    offset, ownerIndent: owner ? owner.target + owner.width : 0 };
             }
             blankCount = 0;
         }
