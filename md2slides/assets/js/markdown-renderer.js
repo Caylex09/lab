@@ -7,21 +7,46 @@
     const md = window.markdownit({ html: false, linkify: false, breaks: false });
     const escape = md.utils.escapeHtml;
 
-    // Avoid raw HTML injection; markdown-it already rejects unsafe link protocols.
-    const linkOpen = md.renderer.rules.link_open ||
+    // Preserve the previous link-protocol allowlist, not just markdown-it's
+    // default blacklist. Never emit half an anchor for a rejected link.
+    const safeLink = value => {
+        if (!value || /[\u0000-\u001f\u007f]/.test(value)) return false;
+        if (/^(?:#|\/|\.\/|\.\.\/)/.test(value)) return true;
+        try {
+            return ['http:', 'https:', 'mailto:'].includes(
+                new URL(value, window.location.origin).protocol
+            );
+        } catch { return false; }
+    };
+    const safeImage = value => {
+        if (!value || /[\u0000-\u001f\u007f]/.test(value)) return false;
+        if (/^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value)) return true;
+        if (/^data:/i.test(value)) return false;
+        if (/^(?:\/|\.\/|\.\.\/)/.test(value)) return true;
+        try {
+            return ['http:', 'https:'].includes(new URL(value, window.location.origin).protocol);
+        } catch { return false; }
+    };
+    const originalLinkOpen = md.renderer.rules.link_open ||
+        ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
+    const originalLinkClose = md.renderer.rules.link_close ||
         ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
     md.renderer.rules.link_open = (tokens, idx, options, env, self) => {
+        const allowed = safeLink(tokens[idx].attrGet('href'));
+        (env.slideLinkStack || (env.slideLinkStack = [])).push(allowed);
+        if (!allowed) return '';
         tokens[idx].attrSet('target', '_blank');
         tokens[idx].attrSet('rel', 'noopener');
-        return linkOpen(tokens, idx, options, env, self);
+        return originalLinkOpen(tokens, idx, options, env, self);
     };
-    const image = md.renderer.rules.image ||
+    md.renderer.rules.link_close = (tokens, idx, options, env, self) =>
+        (env.slideLinkStack || []).pop() === false ? '' :
+            originalLinkClose(tokens, idx, options, env, self);
+    const originalImage = md.renderer.rules.image ||
         ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
     md.renderer.rules.image = (tokens, idx, options, env, self) => {
-        const src = tokens[idx].attrGet('src') || '';
-        if (!src || /^(?:data|file|javascript|vbscript):/i.test(src) ||
-            /^(?!(?:https?:|\/|\.\/|\.\.\/|#))([a-z][\w+.-]*:|\/\/)/i.test(src)) return '';
-        return image(tokens, idx, options, env, self);
+        if (!safeImage(tokens[idx].attrGet('src'))) return '';
+        return originalImage(tokens, idx, options, env, self);
     };
 
     // Preserve legacy strikethrough markup while using markdown-it syntax.
