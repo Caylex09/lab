@@ -111,3 +111,18 @@ test('display math preserves TeX escaped vertical bars', async ({ page }) => {
   ].join('\n'));
   await expect(page.locator('#currentSlide .katex-display-wrapper')).toContainText(formula);
 });
+
+
+test('list reset boundary does not hide authored thematic breaks', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '1. First',
+    '',
+    '',
+    '5. Restart',
+    '',
+    '**************'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide > ol')).toHaveCount(2);
+  await expect(page.locator('#currentSlide > ol').last()).toHaveAttribute('start', '5');
+  await expect(page.locator('#currentSlide > hr')).toHaveCount(1);
+});
