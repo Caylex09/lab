@@ -171,3 +171,28 @@ test('non-web external protocol links do not bypass the legacy allowlist', async
   await expect(slide).toContainText('intent');
   await expect(slide).toContainText('smb');
 });
+
+
+test('code fences preserve actual tab indentation in their contents', async ({ page }) => {
+  const fence = String.fromCharCode(96).repeat(3);
+  await page.locator('#markdownInput').fill([
+    fence + 'js',
+    '\tfoo()',
+    fence
+  ].join('\n'));
+  await expect(page.locator('#currentSlide pre.code code')).toHaveText('\tfoo()');
+});
+
+test('display math containing literal tilde fence lines is not cut short', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '$$',
+    '~~~~~',
+    '~~~~~~~',
+    '$$'
+  ].join('\n'));
+  const formula = page.locator('#currentSlide .katex-display-wrapper');
+  await expect(formula).toHaveCount(1);
+  await expect(formula).toContainText('~~~~~');
+  await expect(formula).toContainText('~~~~~~~');
+  await expect(page.locator('#currentSlide pre.code')).toHaveCount(0);
+});
