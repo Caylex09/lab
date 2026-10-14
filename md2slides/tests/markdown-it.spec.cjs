@@ -593,8 +593,38 @@ test('rejected image protocols keep escaped alt text without any img element', a
     '![<img src=x onerror=alert(1)>](ftp://host/image.png)'
   ].join('\n'));
   const slide = page.locator('#currentSlide');
-  await expect(slide).toContainText('diagram');
-  await expect(slide).toContainText('warning');
-  await expect(slide).toContainText('<img src=x onerror=alert(1)>');
+  // Exact text assertions catch a rejected URL leaking literal Markdown
+  // syntax: ![**warning**](javascript:...) must render as 'warning' only.
+  await expect(slide.locator(':scope > p')).toHaveText([
+    'diagram', 'warning', '<img src=x onerror=alert(1)>'
+  ]);
   await expect(slide.locator('img, script')).toHaveCount(0);
+});
+
+
+test('unsafe image destinations use only safely escaped alt text', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '![**important** & <b>](javascript:alert(1))',
+    '',
+    '![preview](data:text/html,%3Cscript%3Ealert(1)%3C/script%3E)',
+    '',
+    '[unsafe link](javascript:alert(1))'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText([
+    'important & <b>', 'preview', 'unsafe link'
+  ]);
+  await expect(slide.locator('a, img, b, script')).toHaveCount(0);
+});
+
+test('render-time safety check still allows ordinary HTTPS links and images', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[documentation](https://example.com/manual)',
+    '',
+    '![diagram](https://example.com/diagram.png)'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a')).toHaveAttribute('href', 'https://example.com/manual');
+  await expect(slide.locator('img')).toHaveAttribute('src', 'https://example.com/diagram.png');
+  await expect(slide.locator('img')).toHaveAttribute('alt', 'diagram');
 });
