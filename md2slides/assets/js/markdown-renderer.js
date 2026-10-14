@@ -45,7 +45,9 @@
     const originalImage = md.renderer.rules.image ||
         ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
     md.renderer.rules.image = (tokens, idx, options, env, self) => {
-        if (!safeImage(tokens[idx].attrGet('src'))) return '';
+        if (!safeImage(tokens[idx].attrGet('src'))) {
+            return escape(self.renderInlineAsText(tokens[idx].children || [], options, env));
+        }
         return originalImage(tokens, idx, options, env, self);
     };
 
@@ -116,7 +118,7 @@
     md.renderer.rules.slide_pause = () => '<span class="pause-marker" data-pause="true"></span>';
 
     // Keep dollar-delimited TeX opaque to Markdown escapes and pause tokens.
-    const closingDollar = (src, start) => {
+    const closingDollar = (src, start, env) => {
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
         for (let i = start + 1; i < src.length && src[i] !== '\n'; i++) {
             if (src[i] === '\\') { i++; continue; }
@@ -152,18 +154,43 @@
                     else if (src[at] === ']') brackets--;
                     at++;
                 }
-                if (!brackets && src[at] === '(') {
-                    let parens = 1;
-                    at++;
-                    while (at < src.length && src[at] !== '\n' && parens) {
-                        if (src[at] === '\\') { at += 2; continue; }
-                        if (src[at] === '(') parens++;
-                        else if (src[at] === ')') parens--;
+                if (!brackets) {
+                    if (src[at] === '(') {
+                        let parens = 1;
                         at++;
-                    }
-                    if (!parens) {
-                        i = at - 1;
-                        continue;
+                        while (at < src.length && src[at] !== '\n' && parens) {
+                            if (src[at] === '\\') { at += 2; continue; }
+                            if (src[at] === '(') parens++;
+                            else if (src[at] === ')') parens--;
+                            at++;
+                        }
+                        if (!parens) {
+                            i = at - 1;
+                            continue;
+                        }
+                    } else {
+                        // Let markdown-it resolve full, collapsed, and shortcut
+                        // reference links against its own parsed definitions.
+                        let end = at;
+                        if (src[at] === '[') {
+                            end++;
+                            while (end < src.length && src[end] !== '\n') {
+                                if (src[end] === '\\') { end += 2; continue; }
+                                if (src[end++] === ']') break;
+                            }
+                        }
+                        const candidate = src.slice(i, end);
+                        if (candidate.includes('$')) {
+                            const tokens = [];
+                            md.inline.parse(candidate, md, env, tokens);
+                            if (tokens.length >= 3 &&
+                                (tokens[0].type === 'link_open' || tokens[0].type === 'image') &&
+                                (tokens[0].type === 'image' ||
+                                    tokens[tokens.length - 1].type === 'link_close')) {
+                                i = end - 1;
+                                continue;
+                            }
+                        }
                     }
                 }
             }
@@ -198,7 +225,7 @@
             start.startsWith('$') && !start.startsWith('$$') ? '$' : null;
         if (!left) return false;
         const right = left === '\\(' ? '\\)' : left === '\\[' ? '\\]' : '$';
-        const end = left === '$' ? closingDollar(state.src, state.pos) :
+        const end = left === '$' ? closingDollar(state.src, state.pos, state.env) :
             state.src.indexOf(right, state.pos + left.length);
         if (end < 0) return false;
         if (!silent) {
@@ -258,7 +285,7 @@
                 item.seen = true;
                 // Checkboxes only belong in the leading paragraph of a bullet
                 // item. Ordered lists and continuation text keep literal [ ].
-                const task = firstParagraph && taskLead && item.list?.type === 'bullet_list_open' &&
+                const task = firstParagraph && taskLead && token.map?.[0] === item.open.map?.[0] && item.list?.type === 'bullet_list_open' &&
                     /^\[([ xX])\]\s+/.exec(inline.content);
                 if (task) {
                     item.task = true;
@@ -419,7 +446,7 @@
         for (let i = at - 1; i >= 0 && line[i] === '\\'; i--) count++;
         return count % 2 === 1;
     };
-    function protectTablePipes(source) {
+    function protectTablePipes(source, env) {
         let fence = null;
         return source.split('\n').map(line => {
             const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
@@ -449,7 +476,7 @@
                     }
                 }
                 if (line[i] === '$' && !isEscaped(line, i)) {
-                    const end = closingDollar(line, i);
+                    const end = closingDollar(line, i, env);
                     if (end > i) {
                         protectedLine += line.slice(i, end + 1).replace(/\|/g, PIPE);
                         i = end + 1;
@@ -554,7 +581,15 @@
     md.renderer.rules.slide_list_boundary = () => '';
 
     window.md2slidesMarkdown = {
-        render: source => md.render(protectTablePipes(protectDisplayMath(normalizeListMarkers(source))))
-            .replace(/\uE021/g, '|').replace(/\uE022/g, '\\')
+        render(source) {
+            const normalized = protectDisplayMath(normalizeListMarkers(source));
+            const env = {};
+            // Markdown-it gathers reference definitions while parsing blocks.
+            // Pass its own environment to the inline math protector and final
+            // renderer instead of guessing CommonMark reference-link syntax.
+            md.block.parse(normalized, md, env, []);
+            return md.render(protectTablePipes(normalized, env), env)
+                .replace(/\uE021/g, '|').replace(/\uE022/g, '\\');
+        }
     };
 })();
