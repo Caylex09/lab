@@ -126,3 +126,48 @@ test('list reset boundary does not hide authored thematic breaks', async ({ page
   await expect(page.locator('#currentSlide > ol').last()).toHaveAttribute('start', '5');
   await expect(page.locator('#currentSlide > hr')).toHaveCount(1);
 });
+
+
+test('dollar inline math preserves TeX escapes and never triggers pause markers', async ({ page }) => {
+  const examples = [
+    String.raw`$\{x\}$`,
+    String.raw`$x\|y$`,
+    String.raw`$x\_y$`,
+    String.raw`$x\pause y$`
+  ];
+  await page.locator('#markdownInput').fill(examples.join(' and '));
+  const slide = page.locator('#currentSlide');
+  for (const formula of examples) await expect(slide).toContainText(formula);
+  await expect(slide.locator('.pause-marker')).toHaveCount(0);
+  await expect(page.locator('#slideTotal')).toHaveText('1');
+});
+
+test('a math expression with pipes stays in one table cell with literal TeX', async ({ page }) => {
+  const formula = String.raw`$x\|y$`;
+  await page.locator('#markdownInput').fill([
+    '| Variable | Expression |',
+    '| --- | --- |',
+    '| x | ' + formula + ' |'
+  ].join('\n'));
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('tbody td')).toHaveCount(2);
+  await expect(table.locator('tbody td').last()).toHaveText(formula);
+});
+
+test('non-web external protocol links do not bypass the legacy allowlist', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[intent](intent://open/settings)',
+    '[smb](smb://host/path)',
+    '[ftp](ftp://files.example.com/x)',
+    '[web](https://example.com/)',
+    '[relative](./readme.md)',
+    '[email](mailto:test@example.com)'
+  ].join(' '));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a')).toHaveCount(3);
+  await expect(slide.locator('a[href^="https:"]')).toHaveCount(1);
+  await expect(slide.locator('a[href^="mailto:"]')).toHaveCount(1);
+  await expect(slide.locator('a[href^="intent:"], a[href^="ftp:"], a[href^="smb:"]')).toHaveCount(0);
+  await expect(slide).toContainText('intent');
+  await expect(slide).toContainText('smb');
+});
