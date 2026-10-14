@@ -250,6 +250,13 @@
                 frames.push({ depth, target, width });
             } else {
                 const owner = ownerFor(indent(line));
+                if (owner && owner !== frames[frames.length - 1]) {
+                    // A dedented continuation belongs to an ancestor after a
+                    // child list. Separate the child list and parent's next
+                    // paragraph instead of using CommonMark lazy continuation.
+                    if (output[output.length - 1]?.trim()) output.push('');
+                    frames.length = frames.indexOf(owner) + 1;
+                }
                 const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
                 output.push(padLine(line, offset));
                 if (!indent(line) && !marker) frames.length = 0;
