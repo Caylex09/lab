@@ -445,3 +445,52 @@ test('nested bullet tasks still render while ordered tasks remain literal', asyn
   await expect(ordered).toHaveText('[ ] Ordered label');
   await expect(ordered.locator('input[type="checkbox"]')).toHaveCount(0);
 });
+
+
+test('blockquote nested in bullet item keeps task-like text literal', async ({ page }) => {
+  await page.locator('#markdownInput').fill('- > [ ] quoted text');
+  const item = page.locator('#currentSlide > ul > li');
+  await expect(item).toHaveCount(1);
+  await expect(item.locator(':scope > blockquote')).toContainText('[ ] quoted text');
+  await expect(item.locator('input[type="checkbox"], .task-item')).toHaveCount(0);
+  await expect(item).not.toHaveClass(/task-item/);
+});
+
+test('quoted task marker after a leading paragraph does not convert its item', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- First',
+    '',
+    '  > [x] quoted continuation',
+    '  > another line',
+    '- Next'
+  ].join('\n'));
+  const item = page.locator('#currentSlide > ul > li').first();
+  await expect(item.locator(':scope > blockquote')).toContainText('[x] quoted continuation');
+  await expect(item.locator('input[type="checkbox"]')).toHaveCount(0);
+  await expect(item).not.toHaveClass(/task-item/);
+});
+
+test('task item nested in a bullet list is still recognized from direct paragraph', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Parent',
+    '  > quoted text',
+    '  - [x] Child task',
+    '  - [ ] Other child'
+  ].join('\n'));
+  const nested = page.locator('#currentSlide > ul > li > ul.task-list');
+  await expect(nested.locator(':scope > li.task-item')).toHaveCount(2);
+  await expect(nested.locator('input[type="checkbox"]').first()).toBeChecked();
+  await expect(page.locator('#currentSlide > ul > li').first()).not.toHaveClass(/task-item/);
+});
+
+test('blockquote paragraphs are not split into list-continuation paragraphs', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- > Quoted first line',
+    '  > quoted second line',
+    '- Sibling'
+  ].join('\n'));
+  const quote = page.locator('#currentSlide > ul > li').first().locator(':scope > blockquote');
+  await expect(quote).toContainText('Quoted first line');
+  await expect(quote).toContainText('quoted second line');
+  await expect(quote.locator('p.list-continuation')).toHaveCount(0);
+});
