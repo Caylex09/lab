@@ -261,7 +261,9 @@
         for (const line of source.split('\n')) {
             const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
             if (fence) {
-                output.push(padLine(line, fence.offset));
+                // Leave a fenced code body byte-for-byte intact except for
+                // indentation added to nest the whole fence in its owning item.
+                output.push(fence.offset > 0 ? ' '.repeat(fence.offset) + line : line);
                 if (marker && marker[1][0] === fence.char &&
                     marker[1].length >= fence.size &&
                     /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
@@ -409,9 +411,14 @@
                 if (last >= lines.length) { output.push(line); continue; }
             }
             const pad = opening[1];
-            output.push(pad + '~~~~~md2slides-display-math');
+            // Choose a delimiter longer than all tilde runs in the source.
+            // Literal lines of tildes inside math must never close the wrapper.
+            const longest = (block.join('\n').match(/~+/g) || [])
+                .reduce((max, run) => Math.max(max, run.length), 0);
+            const fenceLine = '~'.repeat(Math.max(5, longest + 1));
+            output.push(pad + fenceLine + 'md2slides-display-math');
             for (const piece of block) output.push(pad + piece);
-            output.push(pad + '~~~~~');
+            output.push(pad + fenceLine);
             i = last;
         }
         return output.join('\n');
