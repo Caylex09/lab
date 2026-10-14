@@ -135,7 +135,8 @@
                 if (task) {
                     item.task = true;
                     item.open.attrJoin('class', 'task-item');
-                    if (item.list?.type === 'bullet_list_open') item.list.attrJoin('class', 'task-list');
+                    if (item.list?.type === 'bullet_list_open' && !item.list.attrGet('class')?.split(/\s+/).includes('task-list'))
+                        item.list.attrJoin('class', 'task-list');
                     inline.content = inline.content.replace(/^\[([ xX])\]\s+/, '');
                     inline.children = parseInline(state, inline.content).children;
                 }
