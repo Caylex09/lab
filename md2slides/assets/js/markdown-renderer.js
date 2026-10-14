@@ -168,15 +168,22 @@
                 }
             }
             if (src[i] === '<') {
-                // CommonMark angle autolinks are opaque. Their URL or email
-                // contents may contain '$', which cannot close inline math.
+                // Ask markdown-it itself which angle constructs are autolinks.
+                // Duplicating its URL/email regex diverges on legal addresses
+                // such as <cost$offer@example> with a single-label domain.
                 const end = src.indexOf('>', i + 1);
                 if (end !== -1) {
-                    const target = src.slice(i + 1, end);
-                    if (/^[a-z][a-z0-9.+-]{1,31}:[^\s<>]*$/i.test(target) ||
-                        /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(target)) {
-                        i = end;
-                        continue;
+                    const candidate = src.slice(i, end + 1);
+                    if (candidate.includes('$')) {
+                        const tokens = [];
+                        md.inline.parse(candidate, md, {}, tokens);
+                        if (tokens.length === 3 &&
+                            tokens[0].type === 'link_open' &&
+                            tokens[1].type === 'text' &&
+                            tokens[2].type === 'link_close') {
+                            i = end;
+                            continue;
+                        }
                     }
                 }
             }
@@ -227,12 +234,16 @@
 
             if (token.type === 'paragraph_open' && items.length && tokens[i + 1]?.type === 'inline') {
                 const item = items[items.length - 1], inline = tokens[i + 1];
-                if (item.seen) {
+                const firstParagraph = !item.seen;
+                if (!firstParagraph) {
                     token.hidden = false;
                     token.attrJoin('class', 'list-continuation');
                 }
                 item.seen = true;
-                const task = !item.task && /^\[([ xX])\]\s+/.exec(inline.content);
+                // Checkboxes only belong in the leading paragraph of a bullet
+                // item. Ordered lists and continuation text keep literal [ ].
+                const task = firstParagraph && item.list?.type === 'bullet_list_open' &&
+                    /^\[([ xX])\]\s+/.exec(inline.content);
                 if (task) {
                     item.task = true;
                     item.open.attrJoin('class', 'task-item');
