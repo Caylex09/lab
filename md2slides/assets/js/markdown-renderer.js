@@ -302,7 +302,8 @@
                     frames.length = frames.indexOf(owner) + 1;
                 }
                 const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
-                output.push(padLine(line, offset));
+                // Preserve root-level Tab indentation used by CommonMark code blocks.
+                output.push(owner ? padLine(line, offset) : line);
                 if (!indent(line) && !marker) frames.length = 0;
                 if (marker) fence = { char: marker[1][0], size: marker[1].length, offset };
             }
@@ -315,6 +316,11 @@
     // work around Markdown-it table splitting that otherwise sees them as
     // column delimiters. Restore the literal characters after rendering.
     const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022';
+    const isEscaped = (line, at) => {
+        let count = 0;
+        for (let i = at - 1; i >= 0 && line[i] === '\\'; i--) count++;
+        return count % 2 === 1;
+    };
     function protectTablePipes(source) {
         let fence = null;
         return source.split('\n').map(line => {
@@ -333,10 +339,20 @@
             }
             let protectedLine = '';
             for (let i = 0; i < line.length;) {
-                if (line[i] === '$') {
+                // Preserve parenthesized and bracket math as opaque TeX too.
+                if (line[i] === '\\' && !isEscaped(line, i) &&
+                    (line[i + 1] === '(' || line[i + 1] === '[')) {
+                    const closer = line[i + 1] === '(' ? '\\)' : '\\]';
+                    const end = line.indexOf(closer, i + 2);
+                    if (end >= 0) {
+                        protectedLine += line.slice(i, end + 2).replace(/\|/g, PIPE);
+                        i = end + 2;
+                        continue;
+                    }
+                }
+                if (line[i] === '$' && !isEscaped(line, i)) {
                     const end = closingDollar(line, i);
                     if (end > i) {
-                        // Do not strip TeX backslashes inside a formula.
                         protectedLine += line.slice(i, end + 1).replace(/\|/g, PIPE);
                         i = end + 1;
                         continue;
