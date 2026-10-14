@@ -140,6 +140,33 @@
                 else i--;
                 continue;
             }
+            if (src[i] === '[' || (src[i] === '!' && src[i + 1] === '[')) {
+                // A '$' in a Markdown link/image destination is URL text,
+                // not a possible closing math delimiter. Respect nested label
+                // brackets, nested destination parentheses and escapes.
+                const labelStart = src[i] === '!' ? i + 1 : i;
+                let at = labelStart + 1, brackets = 1;
+                while (at < src.length && src[at] !== '\n' && brackets) {
+                    if (src[at] === '\\') { at += 2; continue; }
+                    if (src[at] === '[') brackets++;
+                    else if (src[at] === ']') brackets--;
+                    at++;
+                }
+                if (!brackets && src[at] === '(') {
+                    let parens = 1;
+                    at++;
+                    while (at < src.length && src[at] !== '\n' && parens) {
+                        if (src[at] === '\\') { at += 2; continue; }
+                        if (src[at] === '(') parens++;
+                        else if (src[at] === ')') parens--;
+                        at++;
+                    }
+                    if (!parens) {
+                        i = at - 1;
+                        continue;
+                    }
+                }
+            }
             if (src[i] === '$' && src[i + 1] !== '$') return i;
         }
         return -1;
