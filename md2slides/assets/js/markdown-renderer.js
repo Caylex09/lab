@@ -229,16 +229,27 @@
             const token = tokens[i];
             if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') lists.push(token);
             if (token.type === 'bullet_list_close' || token.type === 'ordered_list_close') lists.pop();
-            if (token.type === 'list_item_open') items.push({ open: token, list: lists[lists.length - 1], seen: false });
+            if (token.type === 'list_item_open') items.push({ open: token, list: lists[lists.length - 1], seen: false, leadingBlock: true });
             if (token.type === 'list_item_close') items.pop();
 
-            // Markdown-it provides the exact token nesting depth. A task or
-            // continuation belongs only to paragraphs that are direct children
-            // of the current <li>, never to nested quotes or other containers.
-            if (token.type === 'paragraph_open' && items.length &&
-                token.level === items[items.length - 1].open.level + 1 &&
+            // Markdown-it already identifies all block containers. If the
+            // first direct child is a quote, fence, nested list, etc., a later
+            // paragraph cannot become the item's task-checkbox lead.
+            const currentItem = items[items.length - 1];
+            if (currentItem && token.level === currentItem.open.level + 1 &&
+                token.block && token.nesting >= 0 &&
+                token.type !== 'paragraph_open' && token.type !== 'inline') {
+                currentItem.leadingBlock = false;
+            }
+
+            // Direct child paragraphs only: a blockquote paragraph has a
+            // greater token.level and must not affect the list-item state.
+            if (token.type === 'paragraph_open' && currentItem &&
+                token.level === currentItem.open.level + 1 &&
                 tokens[i + 1]?.type === 'inline') {
-                const item = items[items.length - 1], inline = tokens[i + 1];
+                const item = currentItem, inline = tokens[i + 1];
+                const taskLead = item.leadingBlock;
+                item.leadingBlock = false;
                 const firstParagraph = !item.seen;
                 if (!firstParagraph) {
                     token.hidden = false;
@@ -247,7 +258,7 @@
                 item.seen = true;
                 // Checkboxes only belong in the leading paragraph of a bullet
                 // item. Ordered lists and continuation text keep literal [ ].
-                const task = firstParagraph && item.list?.type === 'bullet_list_open' &&
+                const task = firstParagraph && taskLead && item.list?.type === 'bullet_list_open' &&
                     /^\[([ xX])\]\s+/.exec(inline.content);
                 if (task) {
                     item.task = true;
