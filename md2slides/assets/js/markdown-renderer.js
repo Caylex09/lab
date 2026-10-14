@@ -167,6 +167,19 @@
                     }
                 }
             }
+            if (src[i] === '<') {
+                // CommonMark angle autolinks are opaque. Their URL or email
+                // contents may contain '$', which cannot close inline math.
+                const end = src.indexOf('>', i + 1);
+                if (end !== -1) {
+                    const target = src.slice(i + 1, end);
+                    if (/^[a-z][a-z0-9.+-]{1,31}:[^\s<>]*$/i.test(target) ||
+                        /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(target)) {
+                        i = end;
+                        continue;
+                    }
+                }
+            }
             if (src[i] === '$' && src[i + 1] !== '$') return i;
         }
         return -1;
