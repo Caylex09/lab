@@ -39,6 +39,8 @@
     md.renderer.rules.fence = (tokens, idx) => {
         const token = tokens[idx];
         const language = (token.info.trim().split(/\s+/)[0] || '').toLowerCase();
+        if (language === 'md2slides-display-math') return '<div class="katex-display-wrapper">' +
+            escape(token.content.trim()) + '</div>\n';
         if (language === 'mermaid') return '<div class="mermaid">' +
             escape(token.content.replace(/\n$/, '')) + '</div>\n';
         return '<pre class="code"><code' +
@@ -202,25 +204,152 @@
 
     // Preserve the app's two-spaces-or-one-tab list convention. Do not alter
     // fenced code content or non-marker lines.
+    // Compatible two-space list convention, including ordered-list marker
+    // widths. markdown-it itself owns the resulting list structure.
     function normalizeListMarkers(source) {
-        let fence = null;
-        return source.split('\n').map(line => {
+        const output = [], frames = [];
+        let fence = null, blankCount = 0;
+        const indent = line => (line.match(/^[ \t]*/) || [''])[0].replace(/\t/g, '  ').length;
+        const padLine = (line, offset) => {
+            const leading = indent(line);
+            return ' '.repeat(Math.max(0, leading + offset)) + line.trimStart();
+        };
+        const ownerFor = raw => frames.slice().reverse()
+            .find(frame => raw >= frame.depth * 2 + 2);
+        for (const line of source.split('\n')) {
             const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
             if (fence) {
+                output.push(padLine(line, fence.offset));
                 if (marker && marker[1][0] === fence.char &&
                     marker[1].length >= fence.size &&
                     /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
-                return line;
+                continue;
             }
-            if (marker) {
-                fence = { char: marker[1][0], size: marker[1].length };
-                return line;
+            if (!line.trim()) {
+                output.push(line);
+                blankCount++;
+                continue;
             }
-            const item = /^([ \t]*)([-+*]|\d+[.)])(\s+.*)$/.exec(line);
-            if (!item) return line;
-            return ' '.repeat(Math.floor(item[1].replace(/\t/g, '  ').length / 2) * 2) +
-                item[2] + item[3];
+            const match = /^([ \t]*)([-+*]|\d+[.)])(\s+.*)$/.exec(line);
+            if (match) {
+                const depth = Math.floor(indent(match[1]) / 2);
+                const before = frames[frames.length - 1];
+                // Existing editor treats two blank lines as separate lists.
+                if (blankCount >= 2 && depth === 0 && before)
+                    output.splice(output.length - 1, 0, '**************');
+                while (frames.length && frames[frames.length - 1].depth >= depth) frames.pop();
+                const parent = frames[frames.length - 1];
+                const target = parent && depth ? parent.target + parent.width : depth * 2;
+                const width = match[2].length + 1;
+                // A non-1 ordered sublist may not interrupt a paragraph in
+                // CommonMark. A blank line ensures it is parsed as a list.
+                if (parent && /^\d/.test(match[2]) &&
+                    parseInt(match[2], 10) !== 1 && output[output.length - 1]?.trim())
+                    output.push('');
+                output.push(' '.repeat(target) + match[2] + match[3]);
+                frames.push({ depth, target, width });
+            } else {
+                const owner = ownerFor(indent(line));
+                const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
+                output.push(padLine(line, offset));
+                if (!indent(line) && !marker) frames.length = 0;
+                if (marker) fence = { char: marker[1][0], size: marker[1].length, offset };
+            }
+            blankCount = 0;
+        }
+        return output.join('\n');
+    }
+
+    // Protect pipes inside inline-code spans and odd backslash-escaped pipes;
+    // work around Markdown-it table splitting that otherwise sees them as
+    // column delimiters. Restore the literal characters after rendering.
+    const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022';
+    function protectTablePipes(source) {
+        return source.split('\n').map(line => {
+            let protectedLine = '';
+            for (let i = 0; i < line.length;) {
+                if (line[i] === '\x60') {
+                    let start = i;
+                    while (line[i] === '\x60') i++;
+                    const run = i - start;
+                    let closer = -1;
+                    for (let j = i; j < line.length;) {
+                        if (line[j] !== '\x60') { j++; continue; }
+                        let end = j;
+                        while (line[end] === '\x60') end++;
+                        if (end - j === run) { closer = j; break; }
+                        j = end;
+                    }
+                    if (closer !== -1) {
+                        protectedLine += line.slice(start, closer + run).replace(/\|/g, PIPE);
+                        i = closer + run;
+                    } else protectedLine += line.slice(start, i);
+                    continue;
+                }
+                if (line[i] === '\\') {
+                    let j = i;
+                    while (line[j] === '\\') j++;
+                    if (line[j] === '|') {
+                        protectedLine += BACKSLASH_PAIR.repeat(Math.floor((j - i) / 2));
+                        protectedLine += (j - i) % 2 ? PIPE : '|';
+                        i = j + 1;
+                        continue;
+                    }
+                }
+                protectedLine += line[i++];
+            }
+            return protectedLine;
         }).join('\n');
     }
-    window.md2slidesMarkdown = { render: source => md.render(normalizeListMarkers(source)) };
+
+    // Markdown-it can treat a display-math line in a tight list as paragraph
+    // continuation. Encode each math block as a fenced extension block so
+    // Markdown-it can attach it to the correct owning list item.
+    function protectDisplayMath(source) {
+        const output = [];
+        const lines = source.split('\n');
+        let codeFence = null;
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
+            if (codeFence) {
+                output.push(line);
+                if (marker && marker[1][0] === codeFence.char &&
+                    marker[1].length >= codeFence.size &&
+                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) codeFence = null;
+                continue;
+            }
+            if (marker) {
+                codeFence = { char: marker[1][0], size: marker[1].length };
+                output.push(line);
+                continue;
+            }
+            const opening = /^([ \t]*)(\$\$|\\\[)/.exec(line);
+            if (!opening) { output.push(line); continue; }
+            const ending = opening[2] === '$$' ? '$$' : '\\]';
+            const block = [line.trim()];
+            let last = i;
+            if (line.indexOf(ending, opening[0].length) < 0) {
+                for (last = i + 1; last < lines.length; last++) {
+                    block.push(lines[last].trim());
+                    if (lines[last].includes(ending)) break;
+                }
+                if (last >= lines.length) { output.push(line); continue; }
+            }
+            const pad = opening[1];
+            output.push(pad + '~~~~~md2slides-display-math');
+            for (const piece of block) output.push(pad + piece);
+            output.push(pad + '~~~~~');
+            i = last;
+        }
+        return output.join('\n');
+    }
+
+    md.renderer.rules.hr = (tokens, idx, options, env, self) =>
+        tokens[idx].markup === '**************' ? '' : self.renderToken(tokens, idx, options);
+
+    window.md2slidesMarkdown = {
+        render: source => md.render(protectDisplayMath(protectTablePipes(normalizeListMarkers(source))))
+            .replace(/\uE021/g, '|').replace(/\uE022/g, '\\')
+    };
 })();
