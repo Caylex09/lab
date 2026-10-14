@@ -277,7 +277,21 @@
     // column delimiters. Restore the literal characters after rendering.
     const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022';
     function protectTablePipes(source) {
+        let fence = null;
         return source.split('\n').map(line => {
+            const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
+            if (fence) {
+                if (marker && marker[1][0] === fence.char &&
+                    marker[1].length >= fence.size &&
+                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
+                // Pipes inside actual code and synthetic display-math fences
+                // are content, not table separators or Markdown escapes.
+                return line;
+            }
+            if (marker) {
+                fence = { char: marker[1][0], size: marker[1].length };
+                return line;
+            }
             let protectedLine = '';
             for (let i = 0; i < line.length;) {
                 if (line[i] === '\x60') {
@@ -361,7 +375,7 @@
         tokens[idx].markup === '**************' ? '' : self.renderToken(tokens, idx, options);
 
     window.md2slidesMarkdown = {
-        render: source => md.render(protectDisplayMath(protectTablePipes(normalizeListMarkers(source))))
+        render: source => md.render(protectTablePipes(protectDisplayMath(normalizeListMarkers(source))))
             .replace(/\uE021/g, '|').replace(/\uE022/g, '\\')
     };
 })();
