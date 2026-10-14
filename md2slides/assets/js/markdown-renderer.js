@@ -24,6 +24,10 @@
         return image(tokens, idx, options, env, self);
     };
 
+    // Preserve legacy strikethrough markup while using markdown-it syntax.
+    md.renderer.rules.s_open = () => '<del>';
+    md.renderer.rules.s_close = () => '</del>';
+
     md.renderer.rules.table_open = () => '<table class="md-table">\n';
     for (const name of ['th_open', 'td_open']) {
         const original = md.renderer.rules[name] ||
