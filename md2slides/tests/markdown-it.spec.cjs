@@ -949,8 +949,8 @@ test('unclosed parenthesized TeX in a link label does not consume later math', a
   const source = String.raw`[price \(5](https://example.com/shop) then \(x\)`;
   await page.locator('#markdownInput').fill(source);
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText(String.raw`price \(5`);
-  await expect(slide.locator(':scope > p')).toHaveText([String.raw`price \(5 then \(x\)`]);
+  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText('price (5');
+  await expect(slide.locator(':scope > p')).toHaveText([String.raw`price (5 then \(x\)`]);
 });
 
 test('unclosed bracketed TeX in an image label does not swallow later math', async ({ page }) => {
@@ -958,7 +958,7 @@ test('unclosed bracketed TeX in an image label does not swallow later math', asy
   await page.locator('#markdownInput').fill(source);
   const slide = page.locator('#currentSlide');
   await expect(slide.locator('img[src="https://example.com/price.png"]'))
-    .toHaveAttribute('alt', String.raw`price \[5`);
+    .toHaveAttribute('alt', 'price 5');
   await expect(slide).toContainText(String.raw`then \[x\]`);
 });
 
@@ -977,4 +977,12 @@ test('bracketed TeX inside a link label is still treated as opaque math', async 
   const slide = page.locator('#currentSlide');
   await expect(slide.locator('a[href="https://example.com/range"]'))
     .toHaveText(String.raw`range \([0,1)\)`);
+});
+
+test('half-open TeX with a fake Markdown-link prefix stays math outside labels', async ({ page }) => {
+  const source = '$[0,1)$ and $[x]$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText([source]);
+  await expect(slide.locator('a')).toHaveCount(0);
 });
