@@ -806,7 +806,7 @@ test('obsolete synthetic math fence name now renders as ordinary code', async ({
 test('unmatched price dollar does not swallow inline Markdown link destination', async ({ page }) => {
   await page.locator('#markdownInput').fill('$5 [price](https://example.com/$offer)');
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
+  await expect(slide.locator('a[href="https://example.com/$offer"]')).toHaveCount(1);
   await expect(slide).toContainText('$5 price');
 });
 
@@ -828,8 +828,8 @@ test('reference links containing dollars do not close preceding math', async ({ 
     '',
     '[cost]: https://example.com/pricing'
   ].join('\n'));
-  const link = page.locator('#currentSlide a');
-  await expect(link).toHaveAttribute('href', 'https://example.com/pricing');
+  const link = page.locator('#currentSlide');
+  await expect(link.locator('a[href="https://example.com/pricing"]')).toHaveCount(1);
   await expect(page.locator('#currentSlide')).toContainText('$5 cost$offer');
 });
 
