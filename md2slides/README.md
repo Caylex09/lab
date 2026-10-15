@@ -10,6 +10,8 @@ Slides are separated by a line containing `---`, except inside a fenced code blo
 
 Markdown parsing uses a pinned, local browser build of [markdown-it 14.1.0](https://github.com/markdown-it/markdown-it) (MIT; see `assets/js/vendor/markdown-it.LICENSE`). Markdown syntax, including tables, nested lists, code fences, links, and inline formatting, is delegated to markdown-it instead of the former handwritten Markdown parser. The adapter in `assets/js/markdown-renderer.js` adds task checkboxes, slide pause markers, KaTeX display wrappers, Mermaid fences, and GitHub-style admonitions.
 
+Display math (`$` and `\\[`) is a markdown-it block extension and is parsed directly inside lists and quotes; it is not converted into temporary code fences. The compatibility preprocessing is limited to legacy two-space list indentation and protecting escaped or code-span pipes before markdown-it parses tables. It does not parse links, email addresses, images, or mathematical expressions to determine table boundaries.
+
 The vendored parser is loaded locally before the editor, so the core Markdown preview is not dependent on CDN availability. Raw HTML input remains disabled; Markdown links and image sources are still subject to URL-scheme restrictions. The editor keeps its historical two-spaces-or-one-tab list indentation convention, including the separate continuation-paragraph presentation. Slide boundaries (`---`) and export logic remain application-specific.
 
 ## Lists
