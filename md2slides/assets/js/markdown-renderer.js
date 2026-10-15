@@ -75,8 +75,6 @@
     md.renderer.rules.fence = (tokens, idx) => {
         const token = tokens[idx];
         const language = (token.info.trim().split(/\s+/)[0] || '').toLowerCase();
-        if (language === 'md2slides-display-math') return '<div class="katex-display-wrapper">' +
-            escape(token.content.trim()) + '</div>\n';
         if (language === 'mermaid') return '<div class="mermaid">' +
             escape(token.content.replace(/\n$/, '')) + '</div>\n';
         return '<pre class="code"><code' +
