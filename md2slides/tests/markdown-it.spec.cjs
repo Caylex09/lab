@@ -986,3 +986,18 @@ test('half-open TeX with a fake Markdown-link prefix stays math outside labels',
   await expect(slide.locator(':scope > p')).toHaveText([source]);
   await expect(slide.locator('a')).toHaveCount(0);
 });
+
+test('image alt preserves inline TeX and TeX backslash escapes', async ({ page }) => {
+  const formula = String.raw`$x\|y$`;
+  await page.locator('#markdownInput').fill('![math ' + formula + '](https://example.com/math.png)');
+  await expect(page.locator('#currentSlide img[src="https://example.com/math.png"]'))
+    .toHaveAttribute('alt', 'math ' + formula);
+});
+
+test('rejected image URL still safely displays math in alt text', async ({ page }) => {
+  const formula = '$[0,1)$';
+  await page.locator('#markdownInput').fill('![range ' + formula + '](javascript:alert(1))');
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText(['range ' + formula]);
+  await expect(slide.locator('img')).toHaveCount(0);
+});
