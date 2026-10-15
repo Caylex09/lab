@@ -107,6 +107,9 @@
         const token = state.push('slide_math', 'div', 0);
         token.content = pieces.join('\n');
         token.block = true;
+        // Keep the original source range, including inside blockquotes.
+        // Pipe protection must never rewrite TeX from a direct math block.
+        token.map = [start, last + 1];
         state.line = last + 1;
         return true;
     });
@@ -452,11 +455,12 @@
         return count % 2 === 1;
     };
     function protectTablePipes(source, env, blockTokens) {
-        // Markdown-it knows the code-block spans even through blockquote and
-        // list containers. Never mutate code bytes when protecting table pipes.
+        // Markdown-it knows opaque block spans even through blockquote and
+        // list containers. Never mutate code or display TeX when protecting pipes.
         const codeLines = new Set();
         for (const token of blockTokens) {
-            if ((token.type === 'fence' || token.type === 'code_block') && token.map) {
+            if ((token.type === 'fence' || token.type === 'code_block' ||
+                token.type === 'slide_math') && token.map) {
                 for (let line = token.map[0]; line < token.map[1]; line++) {
                     codeLines.add(line);
                 }
