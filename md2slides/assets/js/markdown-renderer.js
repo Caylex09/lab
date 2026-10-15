@@ -151,7 +151,10 @@
         const src = state.src, start = state.pos;
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
         const probe = new state.constructor(src, state.md, state.env, []);
-        for (let i = start + 1; i < src.length && src[i] !== '\n';) {
+        // Link/image labels narrow posMax while markdown-it parses their text.
+        // Never let a math closer or a probed inline rule read past that range.
+        probe.posMax = state.posMax;
+        for (let i = start + 1; i < state.posMax && src[i] !== '\n';) {
             if (src[i] === '\\') { i += 2; continue; }
             // Consecutive inline formulas share adjacent delimiters:
             // the first '$' closes the previous formula, the next opens a new one.
