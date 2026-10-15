@@ -853,3 +853,37 @@ test('unmatched dollar and linked prices preserve table cell boundaries', async 
   await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
   await expect(cells.last()).toHaveText('after');
 });
+
+
+test('adjacent dollar formulas keep Markdown links inside the second formula', async ({ page }) => {
+  const source = '$a$$[x](https://example.com)$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText(source);
+  await expect(slide.locator('a')).toHaveCount(0);
+  const html = await page.evaluate(text => window.md2slidesMarkdown.render(text), source);
+  expect(html).not.toContain('<a ');
+  expect(html).toContain('$a$$[x](https://example.com)$');
+});
+
+test('adjacent dollar formulas keep pause controls opaque', async ({ page }) => {
+  const source = String.raw`$a$$\pause b$`;
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText(source);
+  await expect(slide.locator('.pause-marker')).toHaveCount(0);
+  await expect(page.locator('#slideTotal')).toHaveText('1');
+});
+
+test('dollar formulas adjacent in table cells stay separate math tokens', async ({ page }) => {
+  const source = String.raw`$a$$x\|y$`;
+  await page.locator('#markdownInput').fill([
+    '| A | B |',
+    '| --- | --- |',
+    '| one | ' + source + ' |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.last()).toHaveText(source);
+  await expect(page.locator('#currentSlide .pause-marker')).toHaveCount(0);
+});
