@@ -127,7 +127,7 @@
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
         for (let i = start + 1; i < src.length && src[i] !== '\n'; i++) {
             if (src[i] === '\\') { i++; continue; }
-            if (src[i] === '\x60') {
+            if (src[i] === '\x60' && !isEscaped(src, i)) {
                 // Skip matched inline code: its dollar signs cannot close math.
                 const begin = i;
                 while (src[i] === '\x60') i++;
@@ -485,7 +485,7 @@
                         continue;
                     }
                 }
-                if (line[i] === '\x60') {
+                if (line[i] === '\x60' && !isEscaped(line, i)) {
                     let start = i;
                     while (line[i] === '\x60') i++;
                     const run = i - start;
@@ -522,22 +522,23 @@
     // Markdown-it can treat a display-math line in a tight list as paragraph
     // continuation. Encode each math block as a fenced extension block so
     // Markdown-it can attach it to the correct owning list item.
-    function protectDisplayMath(source) {
+    function protectDisplayMath(source, initialTokens) {
+        // Parse unmodified Markdown first; upstream markdown-it can already
+        // distinguish indented/fenced code even inside blockquote/list items.
+        // Do not rewrite any of those source lines as math placeholders.
+        const codeLines = new Set();
+        for (const token of initialTokens) {
+            if ((token.type === 'code_block' || token.type === 'fence') && token.map) {
+                for (let line = token.map[0]; line < token.map[1]; line++)
+                    codeLines.add(line);
+            }
+        }
+
         const output = [];
         const lines = source.split('\n');
-        let codeFence = null;
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
-            if (codeFence) {
-                output.push(line);
-                if (marker && marker[1][0] === codeFence.char &&
-                    marker[1].length >= codeFence.size &&
-                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) codeFence = null;
-                continue;
-            }
-            if (marker) {
-                codeFence = { char: marker[1][0], size: marker[1].length };
+            if (codeLines.has(i)) {
                 output.push(line);
                 continue;
             }
@@ -547,15 +548,17 @@
             const block = [line.trim()];
             let last = i;
             if (line.indexOf(ending, opening[0].length) < 0) {
-                for (last = i + 1; last < lines.length; last++) {
+                for (last = i + 1; last < lines.length && !codeLines.has(last); last++) {
                     block.push(lines[last].trim());
                     if (lines[last].includes(ending)) break;
                 }
-                if (last >= lines.length) { output.push(line); continue; }
+                if (last >= lines.length || codeLines.has(last)) {
+                    output.push(line);
+                    continue;
+                }
             }
             const pad = opening[1];
-            // Choose a delimiter longer than all tilde runs in the source.
-            // Literal lines of tildes inside math must never close the wrapper.
+            // Match neither a real code fence nor any tilde run inside math.
             const longest = (block.join('\n').match(/~+/g) || [])
                 .reduce((max, run) => Math.max(max, run.length), 0);
             const fenceLine = '~'.repeat(Math.max(5, longest + 1));
@@ -584,7 +587,12 @@
 
     window.md2slidesMarkdown = {
         render(source) {
-            const normalized = protectDisplayMath(normalizeListMarkers(source));
+            const listNormalized = normalizeListMarkers(source);
+            // Preflight on original block structure BEFORE math rewriting.
+            // This protects literal "$$" and "\\[" inside indented code.
+            const initialTokens = [];
+            md.block.parse(listNormalized, md, {}, initialTokens);
+            const normalized = protectDisplayMath(listNormalized, initialTokens);
             const env = {};
             // Markdown-it gathers reference definitions while parsing blocks.
             // Pass its own environment to the inline math protector and final
