@@ -175,12 +175,23 @@
         }
         return -1;
     }
+    // In a link/image label, skip math as a unit during markdown-it's silent
+    // bracket scan, but never let an unmatched opener swallow the label's ]
+    // and its destination. Balanced brackets inside TeX are not label nesting.
+    function localMathCloser(src, begin, end) {
+        let depth = 0;
+        for (let i = begin; i < end; i++) {
+            if (src[i] === '\\') { i++; continue; }
+            if (src[i] === '[') depth++;
+            else if (src[i] === ']') {
+                if (depth === 0) return false;
+                depth--;
+            }
+        }
+        return true;
+    }
     md.inline.ruler.before('escape', 'slide_inline_math', (state, silent) => {
-        // markdown-it probes link/image labels with skipToken before their
-        // closing ] is known. Do not consume math during that silent probe;
-        // the real label is tokenized afterwards with its own posMax.
-        if (silent) return false;
-        const start = state.src.slice(state.pos);
+        const start = state.src.slice(state.pos, state.posMax);
         const left = start.startsWith('\\(') ? '\\(' :
             start.startsWith('\\[') ? '\\[' :
             start.startsWith('$') && !start.startsWith('$$') ? '$' : null;
@@ -188,7 +199,11 @@
         const right = left === '\\(' ? '\\)' : left === '\\[' ? '\\]' : '$';
         const end = left === '$' ? closingDollar(state) :
             state.src.indexOf(right, state.pos + left.length);
-        if (end < 0) return false;
+        // Unlike indexOf, markdown-it's posMax is an exclusive bound while
+        // parsing link/image label contents.
+        if (end < 0 || end + right.length > state.posMax) return false;
+        if (silent && !localMathCloser(state.src, state.pos + left.length, end))
+            return false;
         if (!silent) {
             const token = state.push('slide_inline_math', '', 0);
             token.content = state.src.slice(state.pos, end + right.length);
