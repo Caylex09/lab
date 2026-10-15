@@ -112,7 +112,7 @@
         token.map = [start, last + 1];
         state.line = last + 1;
         return true;
-    });
+    }, { alt: ['paragraph', 'list'] });
     md.renderer.rules.slide_math = (tokens, idx) =>
         '<div class="katex-display-wrapper">' + escape(tokens[idx].content) + '</div>\n';
 
@@ -429,57 +429,6 @@
         }).join('\n');
     }
 
-    // Markdown-it can treat a display-math line in a tight list as paragraph
-    // continuation. Encode each math block as a fenced extension block so
-    // Markdown-it can attach it to the correct owning list item.
-    function protectDisplayMath(source, initialTokens) {
-        // Parse unmodified Markdown first; upstream markdown-it can already
-        // distinguish indented/fenced code even inside blockquote/list items.
-        // Do not rewrite any of those source lines as math placeholders.
-        const codeLines = new Set();
-        for (const token of initialTokens) {
-            if ((token.type === 'code_block' || token.type === 'fence') && token.map) {
-                for (let line = token.map[0]; line < token.map[1]; line++)
-                    codeLines.add(line);
-            }
-        }
-
-        const output = [];
-        const lines = source.split('\n');
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (codeLines.has(i)) {
-                output.push(line);
-                continue;
-            }
-            const opening = /^([ \t]*)(\$\$|\\\[)/.exec(line);
-            if (!opening) { output.push(line); continue; }
-            const ending = opening[2] === '$$' ? '$$' : '\\]';
-            const block = [line.trim()];
-            let last = i;
-            if (line.indexOf(ending, opening[0].length) < 0) {
-                for (last = i + 1; last < lines.length && !codeLines.has(last); last++) {
-                    block.push(lines[last].trim());
-                    if (lines[last].includes(ending)) break;
-                }
-                if (last >= lines.length || codeLines.has(last)) {
-                    output.push(line);
-                    continue;
-                }
-            }
-            const pad = opening[1];
-            // Match neither a real code fence nor any tilde run inside math.
-            const longest = (block.join('\n').match(/~+/g) || [])
-                .reduce((max, run) => Math.max(max, run.length), 0);
-            const fenceLine = '~'.repeat(Math.max(5, longest + 1));
-            output.push(pad + fenceLine + 'md2slides-display-math');
-            for (const piece of block) output.push(pad + piece);
-            output.push(pad + fenceLine);
-            i = last;
-        }
-        return output.join('\n');
-    }
-
     // This invisible synthetic boundary is created only for legacy double-
     // blank-line list breaks. A block rule interrupts CommonMark lists without
     // suppressing a user's actual thematic break (such as asterisks).
@@ -497,17 +446,10 @@
 
     window.md2slidesMarkdown = {
         render(source) {
-            const listNormalized = normalizeListMarkers(source);
-            // Preflight on original block structure BEFORE math rewriting.
-            // This protects literal "$$" and "\\[" inside indented code.
-            const initialTokens = [];
-            md.block.parse(listNormalized, md, {}, initialTokens);
-            const normalized = protectDisplayMath(listNormalized, initialTokens);
-            const env = {};
-            // Markdown-it gathers reference definitions while parsing blocks.
-            // Pass its own environment to the inline math protector and final
-            // renderer instead of guessing CommonMark reference-link syntax.
-            const blockTokens = [];
+            const normalized = normalizeListMarkers(source);
+            // markdown-it's block rule handles ordinary, quoted and list math.
+            // Parse once for opaque source ranges; then render normally.
+            const env = {}, blockTokens = [];
             md.block.parse(normalized, md, env, blockTokens);
             return md.render(protectTablePipes(normalized, blockTokens), env)
                 .replace(/\uE021/g, '|').replace(/\uE022/g, '\\').replace(/\uE023/g, '');
