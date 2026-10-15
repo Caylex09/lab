@@ -168,7 +168,7 @@
                         // takes precedence over a link spanning past it.
                         // Real Markdown links with '$' in their URL still
                         // skip the entire destination.
-                        if ((src[i] === '[' || src[i] === '!') &&
+                        if (src[i] === '[' && i === start + 1 &&
                             src.indexOf('$', i + 1) >= 0 &&
                             src.indexOf('$', i + 1) < src.indexOf(']', i + 1))
                             continue;
