@@ -176,6 +176,10 @@
         return -1;
     }
     md.inline.ruler.before('escape', 'slide_inline_math', (state, silent) => {
+        // markdown-it probes link/image labels with skipToken before their
+        // closing ] is known. Do not consume math during that silent probe;
+        // the real label is tokenized afterwards with its own posMax.
+        if (silent) return false;
         const start = state.src.slice(state.pos);
         const left = start.startsWith('\\(') ? '\\(' :
             start.startsWith('\\[') ? '\\[' :
