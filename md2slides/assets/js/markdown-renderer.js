@@ -50,10 +50,19 @@
     const originalImage = md.renderer.rules.image ||
         ((tokens, idx, options, env, self) => self.renderToken(tokens, idx, options));
     md.renderer.rules.image = (tokens, idx, options, env, self) => {
-        if (!safeImage(tokens[idx].attrGet('src'))) {
-            return escape(self.renderInlineAsText(tokens[idx].children || [], options, env));
+        const token = tokens[idx];
+        const originalChildren = token.children || [];
+        // markdown-it's renderInlineAsText ignores custom token types.
+        // Present opaque TeX as ordinary text when constructing image alt.
+        token.children = originalChildren.map(child => child.type === 'slide_inline_math' ?
+            { ...child, type: 'text', content: restoreMathPipes(child.content) } : child);
+        try {
+            if (!safeImage(token.attrGet('src')))
+                return escape(self.renderInlineAsText(token.children, options, env));
+            return originalImage(tokens, idx, options, env, self);
+        } finally {
+            token.children = originalChildren;
         }
-        return originalImage(tokens, idx, options, env, self);
     };
 
     // Preserve legacy strikethrough markup while using markdown-it syntax.
