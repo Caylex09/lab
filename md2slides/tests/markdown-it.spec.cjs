@@ -889,3 +889,42 @@ test('dollar formulas adjacent in table cells stay separate math tokens', async 
   await expect(cells.last()).toHaveText(source);
   await expect(page.locator('#currentSlide .pause-marker')).toHaveCount(0);
 });
+
+test('unmatched price dollar inside a link label cannot cross its inline boundary', async ({ page }) => {
+  const source = '[price $5](https://example.com/shop) then $x$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  const link = slide.locator('a[href="https://example.com/shop"]');
+  await expect(link).toHaveText('price $5');
+  await expect(slide.locator(':scope > p')).toHaveText(['price $5 then $x$']);
+  expect(await page.evaluate(src => window.md2slidesMarkdown.render(src), source))
+    .toContain('href="https://example.com/shop"');
+});
+
+test('image alt dollar stays inside label while later math is rendered', async ({ page }) => {
+  const source = '![price $5](https://example.com/item.png) then $x$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  const img = slide.locator('img[src="https://example.com/item.png"]');
+  await expect(img).toHaveAttribute('alt', 'price $5');
+  await expect(slide).toContainText('then $x$');
+});
+
+test('reference links with a literal price in label do not swallow following math', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[cost $5][item] then $x$',
+    '',
+    '[item]: https://example.com/shop'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText('cost $5');
+  await expect(slide.locator(':scope > p')).toHaveText(['cost $5 then $x$']);
+});
+
+test('actual inline math inside link text still closes before the label boundary', async ({ page }) => {
+  const source = '[formula $x$](https://example.com/formula) then $y$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/formula"]')).toHaveText('formula $x$');
+  await expect(slide.locator(':scope > p')).toHaveText(['formula $x$ then $y$']);
+});
