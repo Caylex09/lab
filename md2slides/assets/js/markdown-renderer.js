@@ -312,7 +312,12 @@
         const ownerFor = raw => frames.slice().reverse()
             .find(frame => raw >= frame.depth * 2 + 2);
         for (const line of source.split('\n')) {
-            const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
+            const fenceMatch = /^[ \t]*(\x60{3,}|~{3,})(.*)$/.exec(line);
+            // Backtick fence info strings may not contain backticks (CommonMark).
+            // Otherwise a normal continuation line can swallow following items.
+            const marker = fenceMatch &&
+                (fenceMatch[1][0] !== '\x60' || !fenceMatch[2].includes('\x60')) ?
+                [fenceMatch[0], fenceMatch[1]] : null;
             if (fence) {
                 const isClosing = marker && marker[1][0] === fence.char &&
                     marker[1].length >= fence.size &&
