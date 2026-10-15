@@ -125,107 +125,38 @@
     });
     md.renderer.rules.slide_pause = () => '<span class="pause-marker" data-pause="true"></span>';
 
-    // Keep dollar-delimited TeX opaque to Markdown escapes and pause tokens.
-    const closingDollar = (src, start, env) => {
+    // A code span is an opaque Markdown construct. Match backtick run lengths
+    // once and reuse this helper for inline TeX and pipe handling.
+    function codeSpanEnd(src, start) {
+        if (src[start] !== '\x60' || isEscaped(src, start)) return -1;
+        let at = start;
+        while (src[at] === '\x60') at++;
+        const width = at - start;
+        while (at < src.length && src[at] !== '\n') {
+            if (src[at] !== '\x60') { at++; continue; }
+            let end = at;
+            while (src[end] === '\x60') end++;
+            if (end - at === width) return end;
+            at = end;
+        }
+        return -1;
+    }
+
+    // Inline math sees a single inline token / table cell after markdown-it
+    // has decided the block structure. Do not reimplement link, image, email
+    // or table parsing just to search for dollar delimiters.
+    function closingDollar(src, start) {
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
         for (let i = start + 1; i < src.length && src[i] !== '\n'; i++) {
             if (src[i] === '\\') { i++; continue; }
-            if (src[i] === '\x60' && !isEscaped(src, i)) {
-                // Skip matched inline code: its dollar signs cannot close math.
-                const begin = i;
-                while (src[i] === '\x60') i++;
-                const markerLength = i - begin;
-                let afterClose = -1;
-                for (let at = i; at < src.length && src[at] !== '\n';) {
-                    if (src[at] !== '\x60') { at++; continue; }
-                    let end = at;
-                    while (src[end] === '\x60') end++;
-                    if (end - at === markerLength) {
-                        afterClose = end;
-                        break;
-                    }
-                    at = end;
-                }
-                if (afterClose >= 0) i = afterClose - 1;
-                else i--;
-                continue;
-            }
-            if (src[i] === '[' || (src[i] === '!' && src[i + 1] === '[')) {
-                // A '$' in a Markdown link/image destination is URL text,
-                // not a possible closing math delimiter. Respect nested label
-                // brackets, nested destination parentheses and escapes.
-                const labelStart = src[i] === '!' ? i + 1 : i;
-                let at = labelStart + 1, brackets = 1;
-                while (at < src.length && src[at] !== '\n' && brackets) {
-                    if (src[at] === '\\') { at += 2; continue; }
-                    if (src[at] === '[') brackets++;
-                    else if (src[at] === ']') brackets--;
-                    at++;
-                }
-                if (!brackets) {
-                    if (src[at] === '(') {
-                        let parens = 1;
-                        at++;
-                        while (at < src.length && src[at] !== '\n' && parens) {
-                            if (src[at] === '\\') { at += 2; continue; }
-                            if (src[at] === '(') parens++;
-                            else if (src[at] === ')') parens--;
-                            at++;
-                        }
-                        if (!parens) {
-                            i = at - 1;
-                            continue;
-                        }
-                    } else {
-                        // Let markdown-it resolve full, collapsed, and shortcut
-                        // reference links against its own parsed definitions.
-                        let end = at;
-                        if (src[at] === '[') {
-                            end++;
-                            while (end < src.length && src[end] !== '\n') {
-                                if (src[end] === '\\') { end += 2; continue; }
-                                if (src[end++] === ']') break;
-                            }
-                        }
-                        const candidate = src.slice(i, end);
-                        if (candidate.includes('$')) {
-                            const tokens = [];
-                            md.inline.parse(candidate, md, env, tokens);
-                            if (tokens.length >= 3 &&
-                                (tokens[0].type === 'link_open' || tokens[0].type === 'image') &&
-                                (tokens[0].type === 'image' ||
-                                    tokens[tokens.length - 1].type === 'link_close')) {
-                                i = end - 1;
-                                continue;
-                            }
-                        }
-                    }
-                }
-            }
-            if (src[i] === '<') {
-                // Ask markdown-it itself which angle constructs are autolinks.
-                // Duplicating its URL/email regex diverges on legal addresses
-                // such as <cost$offer@example> with a single-label domain.
-                const end = src.indexOf('>', i + 1);
-                if (end !== -1) {
-                    const candidate = src.slice(i, end + 1);
-                    if (candidate.includes('$')) {
-                        const tokens = [];
-                        md.inline.parse(candidate, md, {}, tokens);
-                        if (tokens.length === 3 &&
-                            tokens[0].type === 'link_open' &&
-                            tokens[1].type === 'text' &&
-                            tokens[2].type === 'link_close') {
-                            i = end;
-                            continue;
-                        }
-                    }
-                }
+            if (src[i] === '\x60') {
+                const end = codeSpanEnd(src, i);
+                if (end >= 0) { i = end - 1; continue; }
             }
             if (src[i] === '$' && src[i + 1] !== '$') return i;
         }
         return -1;
-    };
+    }
     md.inline.ruler.before('escape', 'slide_inline_math', (state, silent) => {
         const start = state.src.slice(state.pos);
         const left = start.startsWith('\\(') ? '\\(' :
@@ -233,7 +164,7 @@
             start.startsWith('$') && !start.startsWith('$$') ? '$' : null;
         if (!left) return false;
         const right = left === '\\(' ? '\\)' : left === '\\[' ? '\\]' : '$';
-        const end = left === '$' ? closingDollar(state.src, state.pos, state.env) :
+        const end = left === '$' ? closingDollar(state.src, state.pos) :
             state.src.indexOf(right, state.pos + left.length);
         if (end < 0) return false;
         if (!silent) {
@@ -243,7 +174,7 @@
         state.pos = end + right.length;
         return true;
     });
-    md.renderer.rules.slide_inline_math = (tokens, idx) => escape(tokens[idx].content);
+    md.renderer.rules.slide_inline_math = (tokens, idx) => escape(restoreMathPipes(tokens[idx].content));
 
     const parseInline = (state, src) => {
         const token = new state.Token('inline', '', 0);
@@ -445,81 +376,51 @@
         return output.join('\n');
     }
 
-    // Protect pipes inside inline-code spans and odd backslash-escaped pipes;
-    // work around Markdown-it table splitting that otherwise sees them as
-    // column delimiters. Restore the literal characters after rendering.
-    const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022';
+    // markdown-it owns tables. Protect only the syntax it splits too early:
+    // escaped pipes and pipes inside code spans. Do not parse dollar math,
+    // links, images or autolinks here. The inline renderer restores TeX's
+    // backslashes; ordinary Markdown uses the usual escape semantics.
+    const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022', ESCAPED_SLASH = '\uE023';
     const isEscaped = (line, at) => {
         let count = 0;
         for (let i = at - 1; i >= 0 && line[i] === '\\'; i--) count++;
         return count % 2 === 1;
     };
-    function protectTablePipes(source, env, blockTokens) {
-        // Markdown-it knows opaque block spans even through blockquote and
-        // list containers. Never mutate code or display TeX when protecting pipes.
-        const codeLines = new Set();
+    const restoreMathPipes = src => src
+        .replace(/\uE022/g, '\\\\').replace(/\uE023/g, '\\').replace(/\uE021/g, '|');
+    function protectTablePipes(source, blockTokens) {
+        // Respect markdown-it source maps, including direct blockquote math.
+        const opaque = new Set();
         for (const token of blockTokens) {
-            if ((token.type === 'fence' || token.type === 'code_block' ||
-                token.type === 'slide_math') && token.map) {
-                for (let line = token.map[0]; line < token.map[1]; line++) {
-                    codeLines.add(line);
-                }
+            if (['fence', 'code_block', 'slide_math'].includes(token.type) && token.map) {
+                for (let line = token.map[0]; line < token.map[1]; line++) opaque.add(line);
             }
         }
         return source.split('\n').map((line, index) => {
-            if (codeLines.has(index)) return line;
-            let protectedLine = '';
+            if (opaque.has(index)) return line;
+            let output = '';
             for (let i = 0; i < line.length;) {
-                // Preserve parenthesized and bracket math as opaque TeX too.
-                if (line[i] === '\\' && !isEscaped(line, i) &&
-                    (line[i + 1] === '(' || line[i + 1] === '[')) {
-                    const closer = line[i + 1] === '(' ? '\\)' : '\\]';
-                    const end = line.indexOf(closer, i + 2);
-                    if (end >= 0) {
-                        protectedLine += line.slice(i, end + 2).replace(/\|/g, PIPE);
-                        i = end + 2;
-                        continue;
-                    }
+                const spanEnd = codeSpanEnd(line, i);
+                if (spanEnd >= 0) {
+                    output += line.slice(i, spanEnd).replace(/\|/g, PIPE);
+                    i = spanEnd;
+                    continue;
                 }
-                if (line[i] === '$' && !isEscaped(line, i)) {
-                    const end = closingDollar(line, i, env);
-                    if (end > i) {
-                        protectedLine += line.slice(i, end + 1).replace(/\|/g, PIPE);
+                if (line[i] === '\\') {
+                    let end = i;
+                    while (line[end] === '\\') end++;
+                    if (line[end] === '|') {
+                        const pairs = Math.floor((end - i) / 2);
+                        output += BACKSLASH_PAIR.repeat(pairs);
+                        if ((end - i) % 2) output += ESCAPED_SLASH + PIPE;
+                        else output += '|'; // even escapes: ordinary table delimiter
                         i = end + 1;
                         continue;
                     }
                 }
-                if (line[i] === '\x60' && !isEscaped(line, i)) {
-                    let start = i;
-                    while (line[i] === '\x60') i++;
-                    const run = i - start;
-                    let closer = -1;
-                    for (let j = i; j < line.length;) {
-                        if (line[j] !== '\x60') { j++; continue; }
-                        let end = j;
-                        while (line[end] === '\x60') end++;
-                        if (end - j === run) { closer = j; break; }
-                        j = end;
-                    }
-                    if (closer !== -1) {
-                        protectedLine += line.slice(start, closer + run).replace(/\|/g, PIPE);
-                        i = closer + run;
-                    } else protectedLine += line.slice(start, i);
-                    continue;
-                }
-                if (line[i] === '\\') {
-                    let j = i;
-                    while (line[j] === '\\') j++;
-                    if (line[j] === '|') {
-                        protectedLine += BACKSLASH_PAIR.repeat(Math.floor((j - i) / 2));
-                        protectedLine += (j - i) % 2 ? PIPE : '|';
-                        i = j + 1;
-                        continue;
-                    }
-                }
-                protectedLine += line[i++];
+                output += line[i++];
             }
-            return protectedLine;
+            return output;
         }).join('\n');
     }
 
@@ -603,8 +504,8 @@
             // renderer instead of guessing CommonMark reference-link syntax.
             const blockTokens = [];
             md.block.parse(normalized, md, env, blockTokens);
-            return md.render(protectTablePipes(normalized, env, blockTokens), env)
-                .replace(/\uE021/g, '|').replace(/\uE022/g, '\\');
+            return md.render(protectTablePipes(normalized, blockTokens), env)
+                .replace(/\uE021/g, '|').replace(/\uE022/g, '\\').replace(/\uE023/g, '');
         }
     };
 })();
