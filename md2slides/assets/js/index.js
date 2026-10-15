@@ -967,7 +967,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         const text = dom.markdown.value ?? '';
         const sections = splitSlideSections(text);
         const parts = sections.map(section => section.markdown);
-        const baseSlides = parts.map(s => mdToHtml(s.trim()));
+        // Preserve leading indentation: trimming a slide before Markdown-it
+        // runs turns first-line four-space code blocks into plain paragraphs.
+        const baseSlides = parts.map(s => mdToHtml(s));
 
         // Use the same fence-aware boundaries for cursor-to-slide mapping.
         slideLineRanges = sections.map((section, slideIndex) => ({
