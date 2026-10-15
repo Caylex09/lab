@@ -451,22 +451,19 @@
         for (let i = at - 1; i >= 0 && line[i] === '\\'; i--) count++;
         return count % 2 === 1;
     };
-    function protectTablePipes(source, env) {
-        let fence = null;
-        return source.split('\n').map(line => {
-            const marker = /^[ \t]*(\x60{3,}|~{3,})/.exec(line);
-            if (fence) {
-                if (marker && marker[1][0] === fence.char &&
-                    marker[1].length >= fence.size &&
-                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
-                // Pipes inside actual code and synthetic display-math fences
-                // are content, not table separators or Markdown escapes.
-                return line;
+    function protectTablePipes(source, env, blockTokens) {
+        // Markdown-it knows the code-block spans even through blockquote and
+        // list containers. Never mutate code bytes when protecting table pipes.
+        const codeLines = new Set();
+        for (const token of blockTokens) {
+            if ((token.type === 'fence' || token.type === 'code_block') && token.map) {
+                for (let line = token.map[0]; line < token.map[1]; line++) {
+                    codeLines.add(line);
+                }
             }
-            if (marker) {
-                fence = { char: marker[1][0], size: marker[1].length };
-                return line;
-            }
+        }
+        return source.split('\n').map((line, index) => {
+            if (codeLines.has(index)) return line;
             let protectedLine = '';
             for (let i = 0; i < line.length;) {
                 // Preserve parenthesized and bracket math as opaque TeX too.
@@ -592,8 +589,9 @@
             // Markdown-it gathers reference definitions while parsing blocks.
             // Pass its own environment to the inline math protector and final
             // renderer instead of guessing CommonMark reference-link syntax.
-            md.block.parse(normalized, md, env, []);
-            return md.render(protectTablePipes(normalized, env), env)
+            const blockTokens = [];
+            md.block.parse(normalized, md, env, blockTokens);
+            return md.render(protectTablePipes(normalized, env, blockTokens), env)
                 .replace(/\uE021/g, '|').replace(/\uE022/g, '\\');
         }
     };
