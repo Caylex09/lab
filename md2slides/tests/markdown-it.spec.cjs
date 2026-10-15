@@ -748,3 +748,47 @@ test('admonition display math retains escaped TeX pipes', async ({ page }) => {
   await expect(admonition.locator('.katex-display-wrapper')).toHaveCount(1);
   await expect(admonition.locator('.katex-display-wrapper')).toContainText(formula);
 });
+
+
+test('invalid backtick fence info cannot swallow a following sibling list item', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '- first',
+    '  ' + tick.repeat(3) + 'foo' + tick,
+    '- second'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first()).toContainText('foo');
+  await expect(items.nth(1)).toHaveText('second');
+  await expect(items.first().locator('pre.code')).toHaveCount(0);
+});
+
+test('valid tilde fence info with backticks still keeps its body opaque', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '- first',
+    '  ~~~lang' + tick,
+    '  - not a nested item',
+    '  ~~~',
+    '- second'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first().locator('pre.code code')).toHaveText('- not a nested item');
+  await expect(items.nth(1)).toHaveText('second');
+});
+
+test('table escaped pipes stay plain Markdown outside math, and TeX inside math', async ({ page }) => {
+  const formula = String.raw`$a\|b$`;
+  await page.locator('#markdownInput').fill([
+    '| Plain | Math | Code |',
+    '| --- | --- | --- |',
+    '| a\\|b | ' + formula + ' | ' + String.fromCharCode(96) + 'c | d' + String.fromCharCode(96) + ' |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.first()).toHaveText('a\\|b');
+  await expect(cells.nth(1)).toHaveText(formula);
+  await expect(cells.last().locator('code')).toHaveText('c | d');
+});
