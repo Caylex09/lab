@@ -631,3 +631,52 @@ test('render-time safety check still allows ordinary HTTPS links and images', as
   await expect(image).toHaveCount(1);
   await expect(image).toHaveAttribute('alt', 'diagram');
 });
+
+
+test('fenced code in a blockquote preserves a literal escaped pipe', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '> ~~~',
+    '> \\|',
+    '> ~~~'
+  ].join('\n'));
+  const code = page.locator('#currentSlide > blockquote pre.code code');
+  await expect(code).toHaveText('\\|');
+  await expect(page.locator('#currentSlide table.md-table')).toHaveCount(0);
+});
+
+test('nested blockquotes and list-owned blockquote fences keep code escapes', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- Item',
+    '  > > ~~~js',
+    '  > > const pipe = "\\\\|";',
+    '  > > ~~~',
+    '- Next'
+  ].join('\n'));
+  const items = page.locator('#currentSlide > ul > li');
+  await expect(items).toHaveCount(2);
+  await expect(items.first().locator('blockquote blockquote pre.code code'))
+    .toHaveText('const pipe = "\\\\|";');
+});
+
+test('blockquote tables still preserve pipes inside inline code spans', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '> | Code | Name |',
+    '> | --- | --- |',
+    '> | ' + tick + 'a | b' + tick + ' | correct |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide > blockquote table.md-table tbody td');
+  await expect(cells).toHaveCount(2);
+  await expect(cells.first().locator('code')).toHaveText('a | b');
+  await expect(cells.last()).toHaveText('correct');
+});
+
+test('indented code blocks retain backslash-pipe outside table preprocessing', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    'Intro',
+    '',
+    '    \\|',
+    '    x'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide pre.code code')).toHaveText('\\|\nx');
+});
