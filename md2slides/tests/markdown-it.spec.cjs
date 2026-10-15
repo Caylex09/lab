@@ -859,7 +859,8 @@ test('adjacent dollar formulas keep Markdown links inside the second formula', a
   const source = '$a$$[x](https://example.com)$';
   await page.locator('#markdownInput').fill(source);
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator(':scope > p')).toHaveText(source);
+  // Array form retries while the initial sample's multiple paragraphs remain.
+  await expect(slide.locator(':scope > p')).toHaveText([source]);
   await expect(slide.locator('a')).toHaveCount(0);
   const html = await page.evaluate(text => window.md2slidesMarkdown.render(text), source);
   expect(html).not.toContain('<a ');
@@ -870,7 +871,8 @@ test('adjacent dollar formulas keep pause controls opaque', async ({ page }) => 
   const source = String.raw`$a$$\pause b$`;
   await page.locator('#markdownInput').fill(source);
   const slide = page.locator('#currentSlide');
-  await expect(slide.locator(':scope > p')).toHaveText(source);
+  // Array form retries while the initial sample's multiple paragraphs remain.
+  await expect(slide.locator(':scope > p')).toHaveText([source]);
   await expect(slide.locator('.pause-marker')).toHaveCount(0);
   await expect(page.locator('#slideTotal')).toHaveText('1');
 });
