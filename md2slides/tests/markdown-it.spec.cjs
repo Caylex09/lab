@@ -721,3 +721,30 @@ test('unindented dollar display math still uses the math renderer', async ({ pag
   await expect(page.locator('#currentSlide .katex-display-wrapper')).toContainText('x+y');
   await expect(page.locator('#currentSlide pre.code')).toHaveCount(0);
 });
+
+
+test('display math inside blockquotes keeps escaped TeX pipes opaque', async ({ page }) => {
+  const formula = String.raw`x \| y`;
+  await page.locator('#markdownInput').fill([
+    '> $$',
+    '> ' + formula,
+    '> $$'
+  ].join('\n'));
+  const quoted = page.locator('#currentSlide > blockquote');
+  await expect(quoted.locator('.katex-display-wrapper')).toHaveCount(1);
+  await expect(quoted.locator('.katex-display-wrapper')).toContainText(formula);
+});
+
+test('admonition display math retains escaped TeX pipes', async ({ page }) => {
+  const formula = String.raw`\|z\|`;
+  await page.locator('#markdownInput').fill([
+    '> [!NOTE] Formula',
+    '>',
+    '> $$',
+    '> ' + formula,
+    '> $$'
+  ].join('\n'));
+  const admonition = page.locator('#currentSlide .admonition.note');
+  await expect(admonition.locator('.katex-display-wrapper')).toHaveCount(1);
+  await expect(admonition.locator('.katex-display-wrapper')).toContainText(formula);
+});
