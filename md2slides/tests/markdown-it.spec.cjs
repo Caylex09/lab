@@ -788,7 +788,7 @@ test('table escaped pipes stay plain Markdown outside math, and TeX inside math'
   ].join('\n'));
   const cells = page.locator('#currentSlide table.md-table tbody td');
   await expect(cells).toHaveCount(3);
-  await expect(cells.first()).toHaveText('a\\|b');
+  await expect(cells.first()).toHaveText('a|b');
   await expect(cells.nth(1)).toHaveText(formula);
   await expect(cells.last().locator('code')).toHaveText('c | d');
 });
