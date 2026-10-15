@@ -164,6 +164,14 @@
                 for (const rule of opaqueInlineRules) {
                     probe.pos = i;
                     if (rule(probe, true) && probe.pos > i) {
+                        // A TeX closer inside the prospective link label
+                        // takes precedence over a link spanning past it.
+                        // Real Markdown links with '$' in their URL still
+                        // skip the entire destination.
+                        if ((src[i] === '[' || src[i] === '!') &&
+                            src.indexOf('$', i + 1) >= 0 &&
+                            src.indexOf('$', i + 1) < src.indexOf(']', i + 1))
+                            continue;
                         i = probe.pos;
                         skipped = true;
                         break;
