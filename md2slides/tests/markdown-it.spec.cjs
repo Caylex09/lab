@@ -928,3 +928,11 @@ test('actual inline math inside link text still closes before the label boundary
   await expect(slide.locator('a[href="https://example.com/formula"]')).toHaveText('formula $x$');
   await expect(slide.locator(':scope > p')).toHaveText(['formula $x$ then $y$']);
 });
+
+test('bracketed TeX inside a link label remains a link', async ({ page }) => {
+  const source = '[formula $[x]$](https://example.com/formula) then $y$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/formula"]')).toHaveText('formula $[x]$');
+  await expect(slide.locator(':scope > p')).toHaveText(['formula $[x]$ then $y$']);
+});
