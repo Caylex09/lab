@@ -792,3 +792,13 @@ test('table escaped pipes stay plain Markdown outside math, and TeX inside math'
   await expect(cells.nth(1)).toHaveText(formula);
   await expect(cells.last().locator('code')).toHaveText('c | d');
 });
+
+test('obsolete synthetic math fence name now renders as ordinary code', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '~~~md2slides-display-math',
+    String.raw`\|x\|`,
+    '~~~'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide > pre.code code')).toHaveText(String.raw`\|x\|`);
+  await expect(page.locator('#currentSlide .katex-display-wrapper')).toHaveCount(0);
+});
