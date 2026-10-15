@@ -936,3 +936,45 @@ test('bracketed TeX inside a link label remains a link', async ({ page }) => {
   await expect(slide.locator('a[href="https://example.com/formula"]')).toHaveText('formula $[x]$');
   await expect(slide.locator(':scope > p')).toHaveText(['formula $[x]$ then $y$']);
 });
+
+test('half-open TeX interval brackets stay inside a native link label', async ({ page }) => {
+  const source = '[range $[0,1)$](https://example.com/range) then $x$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/range"]')).toHaveText('range $[0,1)$');
+  await expect(slide.locator(':scope > p')).toHaveText(['range $[0,1)$ then $x$']);
+});
+
+test('unclosed parenthesized TeX in a link label does not consume later math', async ({ page }) => {
+  const source = String.raw`[price \(5](https://example.com/shop) then \(x\)`;
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText(String.raw`price \(5`);
+  await expect(slide.locator(':scope > p')).toHaveText([String.raw`price \(5 then \(x\)`]);
+});
+
+test('unclosed bracketed TeX in an image label does not swallow later math', async ({ page }) => {
+  const source = String.raw`![price \[5](https://example.com/price.png) then \[x\]`;
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/price.png"]'))
+    .toHaveAttribute('alt', String.raw`price \[5`);
+  await expect(slide).toContainText(String.raw`then \[x\]`);
+});
+
+test('unbalanced square bracket inside dollar math does not break an image label', async ({ page }) => {
+  const source = '![range $[0,1)$](https://example.com/range.png) then $y$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/range.png"]'))
+    .toHaveAttribute('alt', 'range $[0,1)$');
+  await expect(slide).toContainText('then $y$');
+});
+
+test('bracketed TeX inside a link label is still treated as opaque math', async ({ page }) => {
+  const source = String.raw`[range \([0,1)\)](https://example.com/range)`;
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/range"]'))
+    .toHaveText(String.raw`range \([0,1)\)`);
+});
