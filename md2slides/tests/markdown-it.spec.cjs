@@ -802,3 +802,54 @@ test('obsolete synthetic math fence name now renders as ordinary code', async ({
   await expect(page.locator('#currentSlide > pre.code code')).toHaveText(String.raw`\|x\|`);
   await expect(page.locator('#currentSlide .katex-display-wrapper')).toHaveCount(0);
 });
+
+test('unmatched price dollar does not swallow inline Markdown link destination', async ({ page }) => {
+  await page.locator('#markdownInput').fill('$5 [price](https://example.com/$offer)');
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
+  await expect(slide).toContainText('$5 price');
+});
+
+test('unmatched dollar does not consume following Markdown image or autolink', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '$5 ![price](https://example.com/$offer.png)',
+    '',
+    '$6 <https://example.com/$offers>'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img')).toHaveAttribute('src', 'https://example.com/$offer.png');
+  await expect(slide.locator('a')).toHaveAttribute('href', 'https://example.com/$offers');
+  await expect(slide).toContainText('$6');
+});
+
+test('reference links containing dollars do not close preceding math', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '$5 [cost$offer][cost]',
+    '',
+    '[cost]: https://example.com/pricing'
+  ].join('\n'));
+  const link = page.locator('#currentSlide a');
+  await expect(link).toHaveAttribute('href', 'https://example.com/pricing');
+  await expect(page.locator('#currentSlide')).toContainText('$5 cost$offer');
+});
+
+test('inline math may include Markdown-looking links with dollar in the destination', async ({ page }) => {
+  const math = '$a [price](https://example.com/$offer) + b$';
+  await page.locator('#markdownInput').fill(math);
+  const slide = page.locator('#currentSlide');
+  await expect(slide).toContainText(math);
+  await expect(slide.locator('a')).toHaveCount(0);
+});
+
+test('unmatched dollar and linked prices preserve table cell boundaries', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Cost | URL | Last |',
+    '| --- | --- | --- |',
+    '| $5 | [price](https://example.com/$offer) | after |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.first()).toHaveText('$5');
+  await expect(cells.nth(1).locator('a')).toHaveAttribute('href', 'https://example.com/$offer');
+  await expect(cells.last()).toHaveText('after');
+});
