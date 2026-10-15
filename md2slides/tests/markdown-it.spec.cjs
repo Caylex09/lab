@@ -680,3 +680,44 @@ test('indented code blocks retain backslash-pipe outside table preprocessing', a
   ].join('\n'));
   await expect(page.locator('#currentSlide pre.code code')).toHaveText('\\|\nx');
 });
+
+
+test('escaped inline backtick does not swallow following table separators', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '| First | Second | Third |',
+    '| --- | --- | --- |',
+    '| \\' + tick + 'a | b' + tick + ' | last |'
+  ].join('\n'));
+  const cells = page.locator('#currentSlide table.md-table tbody td');
+  await expect(cells).toHaveCount(3);
+  await expect(cells.nth(0)).toHaveText(tick + 'a');
+  await expect(cells.nth(1)).toHaveText('b' + tick);
+  await expect(cells.nth(2)).toHaveText('last');
+});
+
+test('four-space-indented dollar display delimiters stay literal code', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '    $$',
+    '    x + y',
+    '    $$'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide > pre.code code')).toHaveText('$$\nx + y\n$$');
+  await expect(page.locator('#currentSlide .katex-display-wrapper')).toHaveCount(0);
+});
+
+test('indented bracket math delimiters stay literal code', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '    \\[',
+    '    z = 4',
+    '    \\]'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide > pre.code code')).toHaveText('\\[\nz = 4\n\\]');
+  await expect(page.locator('#currentSlide .katex-display-wrapper')).toHaveCount(0);
+});
+
+test('unindented dollar display math still uses the math renderer', async ({ page }) => {
+  await page.locator('#markdownInput').fill('$$\nx+y\n$$');
+  await expect(page.locator('#currentSlide .katex-display-wrapper')).toContainText('x+y');
+  await expect(page.locator('#currentSlide pre.code')).toHaveCount(0);
+});
