@@ -1176,3 +1176,58 @@ test('math containing an autolink-like string stays in the same math span', asyn
   await expect(slide.locator(':scope > p')).toHaveText([source]);
   await expect(slide.locator('a')).toHaveCount(0);
 });
+
+test('authored private-use glyphs survive paragraph, code, math and table rendering', async ({ page }) => {
+  const glyphs = String.fromCharCode(0xE021, 0xE022, 0xE023);
+  const tick = String.fromCharCode(96);
+  const source = [
+    'Literal ' + glyphs,
+    '',
+    tick + glyphs + tick,
+    '',
+    '$' + glyphs + '$',
+    '',
+    '| glyph | code pipe |',
+    '| --- | --- |',
+    '| ' + glyphs + ' | ' + tick + 'x|' + glyphs + tick + ' |'
+  ].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('Literal ' + glyphs);
+  expect(html).toContain('<code>' + glyphs + '</code>');
+  expect(html).toContain('$' + glyphs + '$');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>x|' + glyphs + '</code>');
+});
+
+test('dynamic pipe markers do not collide with other authored private-use characters', async ({ page }) => {
+  const glyphs = Array.from({ length: 64 }, (_, i) => String.fromCharCode(0xE000 + i)).join('');
+  const tick = String.fromCharCode(96);
+  const source = [
+    '| text | code |',
+    '| --- | --- |',
+    '| ' + glyphs + ' | ' + tick + 'a|b' + tick + ' |'
+  ].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain(glyphs);
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+});
+
+test('marker reservation is fresh across successive Markdown renders', async ({ page }) => {
+  const glyphs = String.fromCharCode(0xE000, 0xE021, 0xE022, 0xE023);
+  const tick = String.fromCharCode(96);
+  const results = await page.evaluate(({ tick, glyphs }) => {
+    const render = window.md2slidesMarkdown.render;
+    return [
+      render('| A | B |\n| --- | --- |\n| ' + glyphs + ' | ' + tick + 'x|y' + tick + ' |'),
+      render('plain ' + glyphs),
+      render('| A | B |\n| --- | --- |\n| left | ' + tick + 'z|w' + tick + ' |'),
+      render('inline $' + glyphs + '$')
+    ];
+  }, { tick, glyphs });
+  expect(results[0]).toContain(glyphs);
+  expect(results[0]).toContain('<code>x|y</code>');
+  expect(results[1]).toContain('plain ' + glyphs);
+  expect(results[2]).toContain('<code>z|w</code>');
+  expect(results[3]).toContain('$' + glyphs + '$');
+});
