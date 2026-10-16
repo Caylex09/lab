@@ -34,18 +34,43 @@
         token.block = true;
         token.map = [start, last + 1];
 
-        // Delegate the remainder to markdown-it's block parser so headings,
-        // links, lists and references retain their native semantics.
-        const suffix = closingLine.slice(closeAt + right.length).trimStart();
-        if (suffix) {
-            const after = [];
-            state.md.block.parse(suffix, state.md, state.env, after);
-            for (const part of after) {
-                if (part.map) part.map = part.map.map(n => n + last);
-                state.tokens.push(part);
+        // The suffix is part of the SAME Markdown document. Re-tokenize
+        // its virtual start on the closing line together with following
+        // physical lines, using the current block state and nesting context.
+        // A fresh block.parse(suffix) would lose setext underlines, reference
+        // continuations, list ownership and blockquote indentation.
+        const original = state.src.slice(
+            state.bMarks[last] + state.tShift[last], state.eMarks[last]);
+        const leading = original.length - original.trimStart().length;
+        const suffixStart = state.bMarks[last] + state.tShift[last] +
+            leading + closeAt + right.length;
+        const suffix = state.src.slice(suffixStart, state.eMarks[last]);
+        if (suffix.trim()) {
+            const saved = {
+                begin: state.bMarks[last],
+                shift: state.tShift[last],
+                spaces: state.sCount[last],
+                bs: state.bsCount[last]
+            };
+            try {
+                state.bMarks[last] = suffixStart;
+                state.tShift[last] = suffix.length - suffix.trimStart().length;
+                // Tabs in a suffix retain CommonMark's four-column widths.
+                let columns = state.blkIndent;
+                for (let i = 0; i < state.tShift[last]; i++)
+                    columns += suffix[i] === '\t' ? 4 - columns % 4 : 1;
+                state.sCount[last] = columns;
+                state.bsCount[last] = 0;
+                state.md.block.tokenize(state, last, end);
+            } finally {
+                state.bMarks[last] = saved.begin;
+                state.tShift[last] = saved.shift;
+                state.sCount[last] = saved.spaces;
+                state.bsCount[last] = saved.bs;
             }
+        } else {
+            state.line = last + 1;
         }
-        state.line = last + 1;
         return true;
     }, { alt: ['paragraph', 'list'] });
     md.renderer.rules.slide_math = (tokens, idx) =>
