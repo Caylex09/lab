@@ -1349,3 +1349,15 @@ test('multiline inline code keeps literal escaped pipes without preprocessing', 
   expect(html).toContain('a \\| b');
   expect(html).not.toContain('\\uE021');
 });
+
+test('table headers with code pipes are discovered by native table probe', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = ['| ' + tick + 'a|b' + tick + ' | c |', '| --- | --- |', '| one | two |'].join('\n');
+  const result = await page.evaluate(s => {
+    const root = document.createElement('div');
+    root.innerHTML = window.md2slidesMarkdown.render(s);
+    return { headings: [...root.querySelectorAll('th')].map(x => x.textContent),
+      values: [...root.querySelectorAll('tbody td')].map(x => x.textContent) };
+  }, source);
+  expect(result).toEqual({ headings: ['a|b', 'c'], values: ['one', 'two'] });
+});
