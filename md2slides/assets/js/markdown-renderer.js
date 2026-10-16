@@ -199,44 +199,41 @@
         }
         return -1;
     }
-    // During markdown-it's silent link-label scan, only a *local* closing
-    // delimiter can make a math span opaque. Search no farther than the
-    // candidate math span, ignoring native code spans and escaped markers.
-    // The actual link/reference structure remains markdown-it's decision.
-    function nextLabelBoundary(src, from, limit) {
-        for (let i = from; i < limit; i++) {
-            if (src[i] === '\\') { i++; continue; }
-            if (src[i] === '\x60') {
-                const codeEnd = codeSpanEnd(src, i);
-                if (codeEnd >= 0 && codeEnd <= limit) {
-                    i = codeEnd - 1;
-                    continue;
-                }
-            }
-            if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '['))
-                return i;
-        }
-        return -1;
-    }
-    function localMathCloser(src, begin, end) {
-        if (nextLabelBoundary(src, begin, end) >= 0) return false;
+    // Inspect one candidate math span, never the rest of the document.
+    // markdown-it's own code-span and autolink rules make their contents
+    // opaque; Markdown link/reference parsing still belongs to markdown-it.
+    function inspectMathLabel(state, begin, end) {
+        const src = state.src;
+        const probe = new state.constructor(src, state.md, state.env, []);
+        probe.posMax = end;
+        const opaque = [opaqueInlineRules[0], opaqueInlineRules[3]];
         let depth = 0;
-        for (let i = begin; i < end; i++) {
-            if (src[i] === '\\') { i++; continue; }
-            if (src[i] === '\x60') {
-                const codeEnd = codeSpanEnd(src, i);
-                if (codeEnd >= 0 && codeEnd <= end) {
-                    i = codeEnd - 1;
-                    continue;
+        for (let i = begin; i < end;) {
+            if (src[i] === '\\') { i += 2; continue; }
+            if (src[i] === '\x60' || src[i] === '<') {
+                let skipped = false;
+                for (const rule of opaque) {
+                    probe.pos = i;
+                    if (rule(probe, true) && probe.pos > i) {
+                        i = probe.pos;
+                        skipped = true;
+                        break;
+                    }
                 }
+                if (skipped) continue;
             }
+            // Only this formula's span is examined. A delimiter inside
+            // an autolink or code span has already been skipped upstream.
+            if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '['))
+                return { valid: false, boundary: i };
             if (src[i] === '[') depth++;
             else if (src[i] === ']') {
-                if (depth === 0) return false;
+                if (depth === 0) return { valid: false, boundary: -1 };
                 depth--;
             }
+            i++;
         }
-        return true;
+        return { valid: true, boundary: -1 };
     }
     md.inline.ruler.before('escape', 'slide_inline_math', (state, silent) => {
         const start = state.src.slice(state.pos, state.posMax);
@@ -250,16 +247,16 @@
         // Unlike indexOf, markdown-it's posMax is an exclusive bound while
         // parsing link/image label contents.
         if (end < 0 || end + right.length > state.posMax) return false;
-        if (silent && !localMathCloser(state.src, state.pos + left.length, end)) {
-            // The opener '$[' is not closed within this label. During
-            // markdown-it's bracket scan, skip the orphan '[' without
-            // swallowing the enclosing ](destination). During normal
-            // tokenization the unmatched opener remains ordinary Markdown.
-            const labelEnd = left === '$' && state.src[state.pos + 1] === '[' ?
-                nextLabelBoundary(state.src, state.pos + 2, end) : -1;
-            if (labelEnd < 0 || labelEnd >= end) return false;
-            state.pos = labelEnd;
-            return true;
+        if (silent) {
+            const scan = inspectMathLabel(state, state.pos + left.length, end);
+            if (!scan.valid) {
+                // An unmatched '$[' cannot swallow the enclosing label.
+                // Let markdown-it encounter the real closing ] itself.
+                if (left !== '$' || state.src[state.pos + 1] !== '[' ||
+                    scan.boundary < 0) return false;
+                state.pos = scan.boundary;
+                return true;
+            }
         }
         if (!silent) {
             const token = state.push('slide_inline_math', '', 0);
