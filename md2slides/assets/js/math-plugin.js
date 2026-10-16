@@ -105,6 +105,11 @@
         probe.posMax = end;
         const opaque = [opaqueInlineRules[0], opaqueInlineRules[3], opaqueInlineRules[1], opaqueInlineRules[2]];
         let depth = 0;
+        // When a closed formula ends immediately before the enclosing link's
+        // native ](url) or ][ref] delimiter, earlier lookalike bytes belong
+        // to TeX rather than to the Markdown label boundary.
+        const outerCloser = src[end + 1] === ']' &&
+            (src[end + 2] === '(' || src[end + 2] === '[');
         for (let i = begin; i < end;) {
             if (src[i] === '\\') { i += 2; continue; }
             if (src[i] === '\x60' || src[i] === '<' || src[i] === '[' || src[i] === '!') {
@@ -118,12 +123,13 @@
             }
             // Only this formula's span is examined. A delimiter inside
             // an autolink or code span has already been skipped upstream.
-            if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '['))
-                return { valid: false, boundary: i };
+            if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '[') &&
+                !outerCloser) return { valid: false, boundary: i };
             if (src[i] === '[') depth++;
             else if (src[i] === ']') {
-                if (depth === 0) return { valid: false, boundary: -1 };
-                depth--;
+                if (depth === 0) {
+                    if (!outerCloser) return { valid: false, boundary: -1 };
+                } else depth--;
             }
             i++;
         }
