@@ -317,7 +317,7 @@
                 const before = frames[frames.length - 1];
                 // Existing editor treats two blank lines as separate lists.
                 if (blankCount >= 2 && depth === 0 && before)
-                    output.splice(output.length - 1, 0, '\uE030');
+                    output.splice(output.length - 1, 0, LIST_BOUNDARY);
                 while (frames.length && frames[frames.length - 1].depth >= depth) frames.pop();
                 const parent = frames[frames.length - 1];
                 const target = parent && depth ? parent.target + parent.width : depth * 2;
@@ -354,16 +354,15 @@
     // escaped pipes and pipes inside code spans. Do not parse dollar math,
     // links, images or autolinks here. The inline renderer restores TeX's
     // backslashes; ordinary Markdown uses the usual escape semantics.
-    // Choose collision-free private-use tokens for this render. Fixed PUA
-    // markers would silently corrupt user-authored icon-font glyphs.
-    // A fresh source-wide scan also covers previously chosen tokens, so
-    // repeated renders cannot turn authored private-use glyphs into pipes.
-    let PIPE, BACKSLASH_PAIR, ESCAPED_SLASH;
-    function reservePipeMarkers(source) {
+    // Every temporary syntax marker is unique and absent from authored input.
+    // Fixed PUA codepoints would corrupt user-authored icon-font glyphs in
+    // table text, math, code spans, and legacy list separators.
+    let LIST_BOUNDARY, PIPE, BACKSLASH_PAIR, ESCAPED_SLASH;
+    function reserveSyntaxMarkers(source) {
         const used = new Set(source);
         const chosen = [];
         const pick = (start, end) => {
-            for (let point = start; point <= end && chosen.length < 3; point++) {
+            for (let point = start; point <= end && chosen.length < 4; point++) {
                 const char = String.fromCodePoint(point);
                 if (!used.has(char) && !chosen.includes(char)) chosen.push(char);
             }
@@ -372,8 +371,8 @@
         pick(0xE000, 0xF8FF);
         pick(0xF0000, 0xFFFFD);
         pick(0x100000, 0x10FFFD);
-        if (chosen.length < 3) throw new Error('No free Markdown pipe markers');
-        [PIPE, BACKSLASH_PAIR, ESCAPED_SLASH] = chosen;
+        if (chosen.length < 4) throw new Error('No free Markdown syntax markers');
+        [LIST_BOUNDARY, PIPE, BACKSLASH_PAIR, ESCAPED_SLASH] = chosen;
     }
     const isEscaped = (line, at) => {
         let count = 0;
@@ -454,7 +453,7 @@
     // suppressing a user's actual thematic break (such as asterisks).
     md.block.ruler.before('paragraph', 'slide_list_boundary', (state, start, end, silent) => {
         const line = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]);
-        if (line.trim() !== '\uE030') return false;
+        if (line.trim() !== LIST_BOUNDARY) return false;
         if (!silent) {
             const token = state.push('slide_list_boundary', '', 0);
             token.block = true;
@@ -466,8 +465,8 @@
 
     window.md2slidesMarkdown = {
         render(source) {
+            reserveSyntaxMarkers(source);
             const normalized = normalizeListMarkers(source);
-            reservePipeMarkers(normalized);
             // markdown-it's block rule handles ordinary, quoted and list math.
             // Parse once for opaque source ranges; then render normally.
             const env = {}, blockTokens = [];
