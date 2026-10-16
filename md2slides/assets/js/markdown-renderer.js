@@ -174,7 +174,11 @@
                 item.leadingBlock = false;
                 const firstParagraph = !item.seen;
                 if (!firstParagraph) {
+                    // markdown-it hides both ends of tight-list paragraphs.
+                    // Exposing only the opener creates malformed nested <p>s.
                     token.hidden = false;
+                    if (tokens[i + 2]?.type === 'paragraph_close')
+                        tokens[i + 2].hidden = false;
                     token.attrJoin('class', 'list-continuation');
                 }
                 item.seen = true;
