@@ -424,70 +424,62 @@
                 }
             }
         }
-        // Native tokens may contain code spans in *labels*, e.g. [a `x|y`](url).
-        // Only protect those code runs; leave destinations byte-for-byte intact.
-        const protectCodeOnly = fragment => {
-            let output = '';
-            for (let i = 0; i < fragment.length;) {
-                const end = codeSpanEnd(fragment, i);
-                if (end >= 0) {
-                    output += fragment.slice(i, end).replace(/\|/g, PIPE);
-                    i = end;
-                } else output += fragment[i++];
-            }
-            return output;
-        };
+        // Descend through native link/image labels, never into destinations.
+        // markdown-it owns both token boundaries and URL normalization. This
+        // protects code/escaped pipes in labels without editing nested URLs.
         const protectPlain = line => {
-            let output = '';
             const probe = new md.inline.State(line, md, env, []);
-            for (let i = 0; i < line.length;) {
-                // Delegate destination recognition to markdown-it. Skipping
-                // the entire native token also preserves backslash-escaped
-                // pipes and original URL normalization in links and images.
-                if (line[i] === '[' || line[i] === '!' || line[i] === '<') {
-                    let consumed = false;
-                    for (const rule of nativeDestinationRules) {
-                        probe.pos = i;
-                        if (rule(probe, true) && probe.pos > i) {
-                            // Protect label code pipes without inserting
-                            // placeholders into escaped URL destinations.
+            const scan = (from, limit) => {
+                let output = '';
+                for (let i = from; i < limit;) {
+                    if (line[i] === '[' || line[i] === '!' || line[i] === '<') {
+                        let matchEnd = -1;
+                        for (const rule of nativeDestinationRules) {
+                            probe.pos = i;
+                            probe.posMax = limit;
+                            if (rule(probe, true) && probe.pos > i && probe.pos <= limit) {
+                                matchEnd = probe.pos;
+                                break;
+                            }
+                        }
+                        if (matchEnd >= 0) {
                             const labelStart = line[i] === '!' ? i + 1 : i;
                             const labelEnd = line[labelStart] === '[' ?
                                 md.helpers.parseLinkLabel(probe, labelStart, true) : -1;
-                            if (labelEnd >= 0 && labelEnd < probe.pos) {
-                                output += protectCodeOnly(line.slice(i, labelEnd + 1));
-                                output += line.slice(labelEnd + 1, probe.pos);
+                            if (labelEnd >= 0 && labelEnd < matchEnd) {
+                                output += line.slice(i, labelStart + 1);
+                                output += scan(labelStart + 1, labelEnd);
+                                output += line.slice(labelEnd, matchEnd);
                             } else {
-                                output += line.slice(i, probe.pos);
+                                output += line.slice(i, matchEnd);
                             }
-                            i = probe.pos;
-                            consumed = true;
-                            break;
+                            i = matchEnd;
+                            continue;
                         }
                     }
-                    if (consumed) continue;
-                }
-                const spanEnd = codeSpanEnd(line, i);
-                if (spanEnd >= 0) {
-                    output += line.slice(i, spanEnd).replace(/\|/g, PIPE);
-                    i = spanEnd;
-                    continue;
-                }
-                if (line[i] === '\\') {
-                    let end = i;
-                    while (line[end] === '\\') end++;
-                    if (line[end] === '|') {
-                        const pairs = Math.floor((end - i) / 2);
-                        output += BACKSLASH_PAIR.repeat(pairs);
-                        if ((end - i) % 2) output += ESCAPED_SLASH + PIPE;
-                        else output += '|';
-                        i = end + 1;
+                    const spanEnd = codeSpanEnd(line, i);
+                    if (spanEnd >= 0 && spanEnd <= limit) {
+                        output += line.slice(i, spanEnd).replace(/\|/g, PIPE);
+                        i = spanEnd;
                         continue;
                     }
+                    if (line[i] === '\\') {
+                        let end = i;
+                        while (end < limit && line[end] === '\\') end++;
+                        if (end < limit && line[end] === '|') {
+                            const pairs = Math.floor((end - i) / 2);
+                            output += BACKSLASH_PAIR.repeat(pairs);
+                            if ((end - i) % 2) output += ESCAPED_SLASH + PIPE;
+                            else output += '|';
+                            i = end + 1;
+                            continue;
+                        }
+                    }
+                    output += line[i++];
                 }
-                output += line[i++];
-            }
-            return output;
+                return output;
+            };
+            return scan(0, line.length);
         };
         const protectSource = allowed => source.split('\n').map((line, index) => {
             if (!allowed(index)) return line;
