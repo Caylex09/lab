@@ -338,6 +338,10 @@
                     if (output[output.length - 1]?.trim()) output.push('');
                     frames.length = frames.indexOf(owner) + 1;
                 }
+                // A fence with no owning list is a CommonMark root block.
+                // Do not let an earlier wide ordered-list marker own the
+                // text that comes after this fence has closed.
+                if (marker && !owner) frames.length = 0;
                 const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
                 // Preserve root-level Tab indentation used by CommonMark code blocks.
                 output.push(owner ? padLine(line, offset) : line);
@@ -383,7 +387,15 @@
         .split(BACKSLASH_PAIR).join('\\\\')
         .split(ESCAPED_SLASH).join('\\')
         .split(PIPE).join('|');
-    function protectTablePipes(source, blockTokens) {
+    // Native Markdown links/images/autolinks are opaque while protecting
+    // table pipes. In particular their URL attributes must never contain
+    // private-use placeholders that markdown-it will percent-encode.
+    const nativeDestinationRules = ['link', 'image', 'autolink'].map(name => {
+        const item = md.inline.ruler.__rules__.find(rule => rule.name === name);
+        if (!item) throw new Error('Missing markdown-it inline rule: ' + name);
+        return item.fn;
+    });
+    function protectTablePipes(source, blockTokens, env) {
         // Source-map lines are too coarse for display math that closes before
         // the end of a physical line. Collect exact opaque source spans so the
         // following Markdown can still participate in table pipe escaping.
@@ -410,7 +422,24 @@
         }
         const protectPlain = line => {
             let output = '';
+            const probe = new md.inline.State(line, md, env, []);
             for (let i = 0; i < line.length;) {
+                // Delegate destination recognition to markdown-it. Skipping
+                // the entire native token also preserves backslash-escaped
+                // pipes and original URL normalization in links and images.
+                if (line[i] === '[' || line[i] === '!' || line[i] === '<') {
+                    let consumed = false;
+                    for (const rule of nativeDestinationRules) {
+                        probe.pos = i;
+                        if (rule(probe, true) && probe.pos > i) {
+                            output += line.slice(i, probe.pos);
+                            i = probe.pos;
+                            consumed = true;
+                            break;
+                        }
+                    }
+                    if (consumed) continue;
+                }
                 const spanEnd = codeSpanEnd(line, i);
                 if (spanEnd >= 0) {
                     output += line.slice(i, spanEnd).replace(/\|/g, PIPE);
@@ -471,7 +500,7 @@
             // Parse once for opaque source ranges; then render normally.
             const env = {}, blockTokens = [];
             md.block.parse(normalized, md, env, blockTokens);
-            return md.render(protectTablePipes(normalized, blockTokens), env)
+            return md.render(protectTablePipes(normalized, blockTokens, env), env)
                 .split(PIPE).join('|')
                 .split(BACKSLASH_PAIR).join('\\')
                 .split(ESCAPED_SLASH).join('');
