@@ -163,6 +163,15 @@
         if (!rule) throw new Error('Missing markdown-it inline rule: ' + name);
         return rule.fn;
     });
+    // One adapter to markdown-it's native opaque inline rules; math scanning
+    // never needs to reimplement code spans, links, images or autolinks.
+    function nativeOpaqueEnd(probe, at, rules) {
+        for (const rule of rules) {
+            probe.pos = at;
+            if (rule(probe, true) && probe.pos > at) return probe.pos;
+        }
+        return at;
+    }
     function closingDollar(state) {
         const src = state.src, start = state.pos;
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
@@ -176,24 +185,18 @@
             // the first '$' closes the previous formula, the next opens a new one.
             if (src[i] === '$') return i;
             if (src[i] === '\x60' || src[i] === '[' || src[i] === '!' || src[i] === '<') {
-                let skipped = false;
-                for (const rule of opaqueInlineRules) {
-                    probe.pos = i;
-                    if (rule(probe, true) && probe.pos > i) {
-                        // A TeX closer inside the prospective link label
-                        // takes precedence over a link spanning past it.
-                        // Real Markdown links with '$' in their URL still
-                        // skip the entire destination.
-                        if (src[i] === '[' && i === start + 1 &&
-                            src.indexOf('$', i + 1) >= 0 &&
-                            src.indexOf('$', i + 1) < src.indexOf(']', i + 1))
-                            continue;
-                        i = probe.pos;
-                        skipped = true;
-                        break;
+                const skipTo = nativeOpaqueEnd(probe, i, opaqueInlineRules);
+                if (skipTo > i) {
+                    // A TeX closer inside a leading [formula$] comes before
+                    // its apparent Markdown link; otherwise trust upstream.
+                    const closer = src.indexOf('$', i + 1);
+                    const labelEnd = src.indexOf(']', i + 1);
+                    if (!(src[i] === '[' && i === start + 1 &&
+                        closer >= 0 && labelEnd >= 0 && closer < labelEnd)) {
+                        i = skipTo;
+                        continue;
                     }
                 }
-                if (skipped) continue;
             }
             i++;
         }
@@ -211,16 +214,8 @@
         for (let i = begin; i < end;) {
             if (src[i] === '\\') { i += 2; continue; }
             if (src[i] === '\x60' || src[i] === '<') {
-                let skipped = false;
-                for (const rule of opaque) {
-                    probe.pos = i;
-                    if (rule(probe, true) && probe.pos > i) {
-                        i = probe.pos;
-                        skipped = true;
-                        break;
-                    }
-                }
-                if (skipped) continue;
+                const skipTo = nativeOpaqueEnd(probe, i, opaque);
+                if (skipTo > i) { i = skipTo; continue; }
             }
             // Only this formula's span is examined. A delimiter inside
             // an autolink or code span has already been skipped upstream.
