@@ -101,3 +101,40 @@ test('locally closed TeX with reference-like bytes remains in outer link', async
   expect(html).toContain('<a href="/outer"');
   expect(html).toContain('$x][ref]$');
 });
+
+test('display math suffix and following underline form one setext heading', async ({ page }) => {
+  const html = await page.evaluate(() => window.md2slidesMarkdown.render('$$x$$ Heading\n==='));
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toContain('<h1>Heading</h1>');
+  expect(html).not.toContain('<p>Heading</p>');
+});
+
+test('multiline display math suffix continues with the following setext underline', async ({ page }) => {
+  const html = await page.evaluate(() => window.md2slidesMarkdown.render('$$\nx\n$$ Heading\n---'));
+  expect(html).toContain('<h2>Heading</h2>');
+  expect(html).toContain('<div class="katex-display-wrapper">$$\nx\n$$</div>');
+});
+
+test('reference definition after display math may continue on the next source line', async ({ page }) => {
+  const source = '$$x$$ [ref]:\n  https://example.com/reference\n\n[link][ref]';
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<a href="https://example.com/reference"');
+  expect(html).toContain('>link</a>');
+  expect(html).not.toContain('[ref]:');
+});
+
+test('display math suffix keeps the same blockquote and paragraph continuation', async ({ page }) => {
+  const source = '> $$x$$ quoted\n> continued';
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<blockquote>');
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toMatch(/<blockquote>[\s\S]*<p>quoted\ncontinued<\/p>[\s\S]*<\/blockquote>/);
+});
+
+test('display math suffix stays inside a list with its next source line', async ({ page }) => {
+  const source = '- item\n  $$x$$ trailing\n  continues';
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<ul>');
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toMatch(/<li>[\s\S]*trailing\ncontinues[\s\S]*<\/li>/);
+});
