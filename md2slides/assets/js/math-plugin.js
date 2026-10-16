@@ -44,6 +44,19 @@
         const leading = original.length - original.trimStart().length;
         const suffixStart = state.bMarks[last] + state.tShift[last] +
             leading + closeAt + right.length;
+        // Exact physical-source offsets are consumed by table pipe
+        // protection. A closing line can contain ordinary Markdown after
+        // the math delimiter; token.map alone marks that whole line.
+        const firstRaw = state.src.slice(
+            state.bMarks[start] + state.tShift[start], state.eMarks[start]);
+        const firstContent = state.bMarks[start] + state.tShift[start] +
+            (firstRaw.length - firstRaw.trimStart().length);
+        const physicalColumn = at => at -
+            (state.src.lastIndexOf('\n', at - 1) + 1);
+        token.meta = { sourceSpan: {
+            startColumn: physicalColumn(firstContent),
+            endColumn: physicalColumn(suffixStart)
+        } };
         const suffix = state.src.slice(suffixStart, state.eMarks[last]);
         if (suffix.trim()) {
             const saved = {
