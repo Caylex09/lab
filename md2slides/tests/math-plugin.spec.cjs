@@ -148,3 +148,49 @@ test('list continuation paragraphs never emit unbalanced paragraph tags', async 
   expect(html).toContain('<p class="list-continuation">part one</p>');
   expect(html).toContain('<p class="list-continuation">part two</p>');
 });
+
+test('display math and table header with code pipes share a physical line', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '$$x$$ | ' + tick + 'a|b' + tick + ' | c |\n|---|---|\n| one | two |';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+  expect(html).toContain('<td>one</td>');
+});
+
+test('closing line of multiline math may start a table with code pipes', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '$$\nx+1\n$$ | ' + tick + 'a|b' + tick + ' | c |\n|---|---|\n| one | two |';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<div class="katex-display-wrapper">$$\nx+1\n$$</div>');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+});
+
+test('display math table suffix works inside a blockquote', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '> $$x$$ | ' + tick + 'a|b' + tick + ' | c |\n> |---|---|\n> | one | two |';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<blockquote>');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+});
+
+test('display math table suffix works inside an owning list item', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '- item\n  $$x$$ | ' + tick + 'a|b' + tick + ' | c |\n  |---|---|\n  | one | two |';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<ul>');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+});
+
+test('formula prefix stays opaque while suffix protects escaped table pipes', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '$$\\|x\\|$$ | ' + tick + 'a|b' + tick + ' | c |\n|---|---|\n| left | right |';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('\\|x\\|');
+  expect(html).toContain('<table class="md-table">');
+  expect(html).toContain('<code>a|b</code>');
+});
