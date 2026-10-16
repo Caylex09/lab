@@ -9,36 +9,47 @@
     'use strict';
     window.md2slidesMathPlugin = function (md, options) {
         const escape = md.utils.escapeHtml;
-    // Display math is a block; leave KaTeX rendering to the existing stage.
+    // Block display math consumes exactly through its closing delimiter.
+    // Any suffix is parsed as Markdown blocks, not escaped as TeX content.
     md.block.ruler.before('fence', 'slide_math', (state, start, end, silent) => {
-        const first = state.src.slice(state.bMarks[start] + state.tShift[start], state.eMarks[start]).trim();
+        const line = n => state.src.slice(
+            state.bMarks[n] + state.tShift[n], state.eMarks[n]).trim();
+        const first = line(start);
         const left = first.startsWith('$$') ? '$$' : first.startsWith('\\[') ? '\\[' : null;
         if (!left) return false;
         const right = left === '$$' ? '$$' : '\\]';
-        const inlineEnd = first.length > left.length && first.indexOf(right, left.length) !== -1;
         let last = start;
-        if (!inlineEnd) {
-            for (last = start + 1; last < end; last++) {
-                if (state.src.slice(state.bMarks[last] + state.tShift[last], state.eMarks[last]).includes(right)) break;
-            }
-            if (last === end) return false;
-        }
+        let closeAt = first.indexOf(right, left.length);
+        while (closeAt < 0 && ++last < end)
+            closeAt = line(last).indexOf(right);
+        if (closeAt < 0 || last >= end) return false;
         if (silent) return true;
-        const pieces = [];
-        for (let i = start; i <= last; i++)
-            pieces.push(state.src.slice(state.bMarks[i] + state.tShift[i], state.eMarks[i]).trim());
+
+        const contents = [];
+        for (let n = start; n < last; n++) contents.push(line(n));
+        const closingLine = line(last);
+        contents.push(closingLine.slice(0, closeAt + right.length));
         const token = state.push('slide_math', 'div', 0);
-        token.content = pieces.join('\n');
+        token.content = contents.join('\n');
         token.block = true;
-        // Keep the original source range, including inside blockquotes.
-        // Pipe protection must never rewrite TeX from a direct math block.
         token.map = [start, last + 1];
+
+        // Delegate the remainder to markdown-it's block parser so headings,
+        // links, lists and references retain their native semantics.
+        const suffix = closingLine.slice(closeAt + right.length).trimStart();
+        if (suffix) {
+            const after = [];
+            state.md.block.parse(suffix, state.md, state.env, after);
+            for (const part of after) {
+                if (part.map) part.map = part.map.map(n => n + last);
+                state.tokens.push(part);
+            }
+        }
         state.line = last + 1;
         return true;
     }, { alt: ['paragraph', 'list'] });
     md.renderer.rules.slide_math = (tokens, idx) =>
         '<div class="katex-display-wrapper">' + escape(tokens[idx].content) + '</div>\n';
-
     // Reuse markdown-it's grammar for opaque inline constructs rather than
     // reimplementing link, image, autolink or code-span parsing.
     const opaqueInlineRules = ['backticks', 'link', 'image', 'autolink'].map(name => {
