@@ -195,6 +195,16 @@
     // In a link/image label, skip math as a unit during markdown-it's silent
     // bracket scan, but never let an unmatched opener swallow the label's ]
     // and its destination. Balanced brackets inside TeX are not label nesting.
+    // Recognize both inline (](url)) and full/collapsed reference (][ref])
+    // delimiters while leaving link parsing to markdown-it.
+    function nextLabelBoundary(src, from, limit) {
+        for (let i = from; i < limit; i++) {
+            if (src[i] === '\\') { i++; continue; }
+            if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '['))
+                return i;
+        }
+        return -1;
+    }
     function localMathCloser(src, begin, end) {
         let depth = 0;
         for (let i = begin; i < end; i++) {
@@ -202,10 +212,12 @@
             if (src[i] === '[') depth++;
             else if (src[i] === ']') {
                 if (depth === 0) return false;
-                // A '](destination)' before the proposed TeX closer may
-                // be the enclosing Markdown label, not a TeX bracket. Only
-                // treat it as part of TeX when a later closing label exists.
-                if (src[i + 1] === '(' && src.indexOf('](', end + 1) < 0)
+                // A '](url)' or '][ref]' before the proposed TeX closer
+                // may terminate the enclosing Markdown label. It can only
+                // be an inner TeX bracket if another label closer follows
+                // this formula.
+                if ((src[i + 1] === '(' || src[i + 1] === '[') &&
+                    nextLabelBoundary(src, end + 1, src.length) < 0)
                     return false;
                 depth--;
             }
@@ -230,7 +242,7 @@
             // swallowing the enclosing ](destination). During normal
             // tokenization the unmatched opener remains ordinary Markdown.
             const labelEnd = left === '$' && state.src[state.pos + 1] === '[' ?
-                state.src.indexOf('](', state.pos + 2) : -1;
+                nextLabelBoundary(state.src, state.pos + 2, end) : -1;
             if (labelEnd < 0 || labelEnd >= end) return false;
             state.pos = labelEnd;
             return true;
