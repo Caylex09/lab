@@ -136,5 +136,15 @@ test('display math suffix stays inside a list with its next source line', async 
   const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
   expect(html).toContain('<ul>');
   expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
-  expect(html).toMatch(/<li>[\s\S]*trailing\ncontinues[\s\S]*<\/li>/);
+  expect(html).toMatch(/<li>[\s\S]*<p class="list-continuation">trailing<\/p>\s*<p class="list-continuation">continues<\/p>[\s\S]*<\/li>/);
+});
+
+test('list continuation paragraphs never emit unbalanced paragraph tags', async ({ page }) => {
+  const source = '- item\n  $$x$$ part one\n  part two';
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  const opens = (html.match(/<p(?:\s[^>]*)?>/g) || []).length;
+  const closes = (html.match(/<\/p>/g) || []).length;
+  expect(opens).toBe(closes);
+  expect(html).toContain('<p class="list-continuation">part one</p>');
+  expect(html).toContain('<p class="list-continuation">part two</p>');
 });
