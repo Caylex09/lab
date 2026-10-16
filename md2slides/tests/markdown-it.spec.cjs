@@ -1073,3 +1073,56 @@ test('balanced TeX brackets remain inside reference link labels', async ({ page 
   await expect(slide.locator('a[href="https://example.com/f"]')).toHaveText('formula $[x]$');
   await expect(slide.locator(':scope > p')).toHaveText(['formula $[x]$ then $y$']);
 });
+
+test('unclosed interval in first reference does not absorb later reference link', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[price $[0,1)][ref] then $x$ [later][ref2]',
+    '',
+    '[ref]: https://example.com/price',
+    '[ref2]: https://example.com/later'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/price"]')).toHaveText('price $[0,1)');
+  await expect(slide.locator('a[href="https://example.com/later"]')).toHaveText('later');
+  await expect(slide.locator(':scope > p')).toHaveText(['price $[0,1) then $x$ later']);
+});
+
+test('inline code containing reference delimiters cannot end a link label', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '[price $[0 ' + tick + '][fake]' + tick + ' tail][ref] then $x$',
+    '',
+    '[ref]: https://example.com/price'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  const link = slide.locator('a[href="https://example.com/price"]');
+  await expect(link).toContainText('price $[0');
+  await expect(link.locator('code')).toHaveText('][fake]');
+  await expect(link).toContainText('tail');
+  await expect(slide).toContainText('then $x$');
+});
+
+test('code with inline-link delimiter does not terminate image reference label', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill([
+    '![price $[0 ' + tick + '](fake)' + tick + ' tail][img] then $y$',
+    '',
+    '[img]: https://example.com/price.png'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/price.png"]'))
+    .toHaveAttribute('alt', 'price $[0 ](fake) tail');
+  await expect(slide).toContainText('then $y$');
+});
+
+test('valid half-open TeX remains opaque before later references', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[range $[0,1)$][ref] then [later][ref2]',
+    '',
+    '[ref]: https://example.com/range',
+    '[ref2]: https://example.com/later'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/range"]')).toHaveText('range $[0,1)$');
+  await expect(slide.locator('a[href="https://example.com/later"]')).toHaveText('later');
+});
