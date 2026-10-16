@@ -192,33 +192,40 @@
         }
         return -1;
     }
-    // In a link/image label, skip math as a unit during markdown-it's silent
-    // bracket scan, but never let an unmatched opener swallow the label's ]
-    // and its destination. Balanced brackets inside TeX are not label nesting.
-    // Recognize both inline (](url)) and full/collapsed reference (][ref])
-    // delimiters while leaving link parsing to markdown-it.
+    // During markdown-it's silent link-label scan, only a *local* closing
+    // delimiter can make a math span opaque. Search no farther than the
+    // candidate math span, ignoring native code spans and escaped markers.
+    // The actual link/reference structure remains markdown-it's decision.
     function nextLabelBoundary(src, from, limit) {
         for (let i = from; i < limit; i++) {
             if (src[i] === '\\') { i++; continue; }
+            if (src[i] === '\x60') {
+                const codeEnd = codeSpanEnd(src, i);
+                if (codeEnd >= 0 && codeEnd <= limit) {
+                    i = codeEnd - 1;
+                    continue;
+                }
+            }
             if (src[i] === ']' && (src[i + 1] === '(' || src[i + 1] === '['))
                 return i;
         }
         return -1;
     }
     function localMathCloser(src, begin, end) {
+        if (nextLabelBoundary(src, begin, end) >= 0) return false;
         let depth = 0;
         for (let i = begin; i < end; i++) {
             if (src[i] === '\\') { i++; continue; }
+            if (src[i] === '\x60') {
+                const codeEnd = codeSpanEnd(src, i);
+                if (codeEnd >= 0 && codeEnd <= end) {
+                    i = codeEnd - 1;
+                    continue;
+                }
+            }
             if (src[i] === '[') depth++;
             else if (src[i] === ']') {
                 if (depth === 0) return false;
-                // A '](url)' or '][ref]' before the proposed TeX closer
-                // may terminate the enclosing Markdown label. It can only
-                // be an inner TeX bracket if another label closer follows
-                // this formula.
-                if ((src[i + 1] === '(' || src[i + 1] === '[') &&
-                    nextLabelBoundary(src, end + 1, src.length) < 0)
-                    return false;
                 depth--;
             }
         }
