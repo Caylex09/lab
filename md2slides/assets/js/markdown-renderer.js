@@ -354,14 +354,36 @@
     // escaped pipes and pipes inside code spans. Do not parse dollar math,
     // links, images or autolinks here. The inline renderer restores TeX's
     // backslashes; ordinary Markdown uses the usual escape semantics.
-    const PIPE = '\uE021', BACKSLASH_PAIR = '\uE022', ESCAPED_SLASH = '\uE023';
+    // Choose collision-free private-use tokens for this render. Fixed PUA
+    // markers would silently corrupt user-authored icon-font glyphs.
+    // Using a single Unicode code point per token keeps Markdown offsets
+    // stable even when the input exhausts the BMP private-use area.
+    let PIPE, BACKSLASH_PAIR, ESCAPED_SLASH;
+    function reservePipeMarkers(source) {
+        const used = new Set(source);
+        const chosen = [];
+        const pick = (start, end) => {
+            for (let point = start; point <= end && chosen.length < 3; point++) {
+                const char = String.fromCodePoint(point);
+                if (!used.has(char) && !chosen.includes(char)) chosen.push(char);
+            }
+        };
+        pick(0xE021, 0xE023);
+        pick(0xE000, 0xF8FF);
+        pick(0xF0000, 0xFFFFD);
+        pick(0x100000, 0x10FFFD);
+        if (chosen.length < 3) throw new Error('No free Markdown pipe markers');
+        [PIPE, BACKSLASH_PAIR, ESCAPED_SLASH] = chosen;
+    }
     const isEscaped = (line, at) => {
         let count = 0;
         for (let i = at - 1; i >= 0 && line[i] === '\\'; i--) count++;
         return count % 2 === 1;
     };
     const restoreMathPipes = src => src
-        .replace(/\uE022/g, '\\\\').replace(/\uE023/g, '\\').replace(/\uE021/g, '|');
+        .split(BACKSLASH_PAIR).join('\\\\')
+        .split(ESCAPED_SLASH).join('\\')
+        .split(PIPE).join('|');
     function protectTablePipes(source, blockTokens) {
         // Source-map lines are too coarse for display math that closes before
         // the end of a physical line. Collect exact opaque source spans so the
@@ -445,12 +467,15 @@
     window.md2slidesMarkdown = {
         render(source) {
             const normalized = normalizeListMarkers(source);
+            reservePipeMarkers(normalized);
             // markdown-it's block rule handles ordinary, quoted and list math.
             // Parse once for opaque source ranges; then render normally.
             const env = {}, blockTokens = [];
             md.block.parse(normalized, md, env, blockTokens);
             return md.render(protectTablePipes(normalized, blockTokens), env)
-                .replace(/\uE021/g, '|').replace(/\uE022/g, '\\').replace(/\uE023/g, '');
+                .split(PIPE).join('|')
+                .split(BACKSLASH_PAIR).join('\\')
+                .split(ESCAPED_SLASH).join('');
         }
     };
 })();
