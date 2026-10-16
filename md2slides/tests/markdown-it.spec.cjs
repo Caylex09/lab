@@ -1056,3 +1056,20 @@ test('reference image labels with unmatched intervals preserve alt', async ({ pa
   await expect(slide.locator('img[src="https://example.com/p.png"]')).toHaveAttribute('alt', 'price $[0,1)');
   await expect(slide).toContainText('then $x$');
 });
+
+
+test('closed half-open intervals stay opaque within full reference labels', async ({ page }) => {
+  const source = '[range $[0,1)$][ref] then $x$' + '\n\n' + '[ref]: https://example.com/range';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/range"]')).toHaveText('range $[0,1)$');
+  await expect(slide.locator(':scope > p')).toHaveText(['range $[0,1)$ then $x$']);
+});
+
+test('balanced TeX brackets remain inside reference link labels', async ({ page }) => {
+  const source = '[formula $[x]$][ref] then $y$' + '\n\n' + '[ref]: https://example.com/f';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/f"]')).toHaveText('formula $[x]$');
+  await expect(slide.locator(':scope > p')).toHaveText(['formula $[x]$ then $y$']);
+});
