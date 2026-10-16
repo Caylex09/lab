@@ -8,11 +8,43 @@ Slides are separated by a line containing `---`, except inside a fenced code blo
 
 ## Markdown parser
 
-Markdown parsing uses a pinned, local browser build of [markdown-it 14.1.0](https://github.com/markdown-it/markdown-it) (MIT; see `assets/js/vendor/markdown-it.LICENSE`). Markdown syntax, including tables, nested lists, code fences, links, and inline formatting, is delegated to markdown-it instead of the former handwritten Markdown parser. The adapter in `assets/js/markdown-renderer.js` adds task checkboxes, slide pause markers, KaTeX display wrappers, Mermaid fences, and GitHub-style admonitions.
+Core Markdown uses the locally vendored **markdown-it 14.1.0** (MIT; license:
+`assets/js/vendor/markdown-it.LICENSE`). Raw HTML is disabled. Native
+Markdown links, images, reference definitions, autolinks, fenced code, tables,
+and inline emphasis must be recognized by markdown-it, **not by a second
+handwritten Markdown parser**.
 
-Display math (`$` and `\\[`) is a markdown-it block extension and is parsed directly inside lists and quotes; it is not converted into temporary code fences. The compatibility preprocessing is limited to legacy two-space list indentation and protecting escaped or code-span pipes before markdown-it parses tables. It does not parse links, email addresses, images, or mathematical expressions to determine table boundaries.
+The rendering boundary is deliberately split:
 
-The vendored parser is loaded locally before the editor, so the core Markdown preview is not dependent on CDN availability. Raw HTML input remains disabled; Markdown links and image sources are still subject to URL-scheme restrictions. The editor keeps its historical two-spaces-or-one-tab list indentation convention, including the separate continuation-paragraph presentation. Slide boundaries (`---`) and export logic remain application-specific.
+- `assets/js/math-plugin.js` is the isolated markdown-it extension for `$$`
+  and `\[` display math, plus `$...$`, `\(...\)` and `\[...\]` inline math.
+  Formula contents are opaque text: Markdown-like syntax inside a recognized
+  formula does not become a nested link, image, or pause command. Within
+  markdown-it link-label probes, the extension uses markdown-it's native
+  inline rules to skip code spans, links, images, and autolinks, and never
+  searches past the active inline parser range (`posMax`).
+- `assets/js/markdown-renderer.js` handles output safety (escaped HTML and
+  permitted URL schemes), task checkboxes, slide pause controls, Mermaid
+  fences, GitHub-style admonitions and table/list legacy compatibility.
+  These are presentation adapters, not another parser for standard Markdown.
+- `assets/js/index.js` owns slide boundaries (`---`), progression, export
+  and browser editor state.
+
+The math plugin is tested on its own in `tests/math-plugin.spec.cjs`: when
+input contains **no math delimiters**, installing it must produce the same
+HTML as untouched markdown-it. The suite also asserts formula opacity and
+interaction with native Markdown links. Any future extension that changes
+math-free Markdown must be treated as a regression.
+
+Compatibility preprocessing is limited to legacy two-space list indentation
+and escaped/code-span pipe protection for tables. Display math is parsed
+directly inside lists and quotes, not turned into temporary code fences.
+External syntax rendering (KaTeX and Mermaid) remains in the slide runtime.
+
+The vendored Markdown parser and math extension are local scripts; core
+Markdown preview does not require a CDN. Link/image URL protocols remain
+restricted at render time. The legacy two-space-or-one-tab list presentation
+convention is preserved, including continuation paragraphs.
 
 ## Lists
 
