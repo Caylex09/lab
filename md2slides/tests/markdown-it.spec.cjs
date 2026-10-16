@@ -1361,3 +1361,55 @@ test('table headers with code pipes are discovered by native table probe', async
   }, source);
   expect(result).toEqual({ headings: ['a|b', 'c'], values: ['one', 'two'] });
 });
+
+test('nested image URL with backticks and escaped pipe remains native inside a table link', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '| label | c |',
+    '|---|---|',
+    '| [outer ![alt](https://example.com/a' + tick + 'x\\|y' + tick + 'b.png)](/outer) | last |'
+  ].join('\n');
+  const data = await page.evaluate(src => {
+    const div = document.createElement('div');
+    div.innerHTML = window.md2slidesMarkdown.render(src);
+    return { cells: [...div.querySelectorAll('tbody td')].map(x => x.textContent),
+      href: div.querySelector('tbody a')?.getAttribute('href'),
+      src: div.querySelector('tbody img')?.getAttribute('src') };
+  }, source);
+  expect(data).toEqual({ cells: ['outer ', 'last'], href: '/outer',
+    src: 'https://example.com/a%60x%7Cy%60b.png' });
+});
+
+test('nested image alt code pipe is protected without rewriting the destination', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '| label | c |',
+    '|---|---|',
+    '| [outer ![alt ' + tick + 'x|y' + tick + '](./a\\|b.png)](/outer) | last |'
+  ].join('\n');
+  const data = await page.evaluate(src => {
+    const div = document.createElement('div');
+    div.innerHTML = window.md2slidesMarkdown.render(src);
+    return { count: div.querySelectorAll('tbody td').length,
+      href: div.querySelector('tbody a')?.getAttribute('href'),
+      src: div.querySelector('tbody img')?.getAttribute('src'),
+      alt: div.querySelector('tbody img')?.getAttribute('alt') };
+  }, source);
+  expect(data).toEqual({ count: 2, href: '/outer',
+    src: './a%7Cb.png', alt: 'alt x|y' });
+});
+
+test('nested image destination behavior matches unmodified markdown-it', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const body = '[outer ![alt](https://example.com/a' + tick + 'x\\|y' + tick + 'b.png)](/outer)';
+  const compared = await page.evaluate(src => {
+    const parser = window.markdownit({ html: false });
+    const get = html => {
+      const div = document.createElement('div'); div.innerHTML = html;
+      return { href: div.querySelector('a')?.getAttribute('href'),
+        src: div.querySelector('img')?.getAttribute('src') };
+    };
+    return { upstream: get(parser.render(src)), slide: get(window.md2slidesMarkdown.render(src)) };
+  }, body);
+  expect(compared.slide).toEqual(compared.upstream);
+});
