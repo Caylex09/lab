@@ -356,8 +356,8 @@
     // backslashes; ordinary Markdown uses the usual escape semantics.
     // Choose collision-free private-use tokens for this render. Fixed PUA
     // markers would silently corrupt user-authored icon-font glyphs.
-    // Using a single Unicode code point per token keeps Markdown offsets
-    // stable even when the input exhausts the BMP private-use area.
+    // A fresh source-wide scan also covers previously chosen tokens, so
+    // repeated renders cannot turn authored private-use glyphs into pipes.
     let PIPE, BACKSLASH_PAIR, ESCAPED_SLASH;
     function reservePipeMarkers(source) {
         const used = new Set(source);
