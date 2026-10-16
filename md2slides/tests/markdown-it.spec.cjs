@@ -1304,3 +1304,48 @@ test('normal list-owned fenced code retains its owner', async ({ page }) => {
   expect(html).toContain('continuation');
   expect(html).toContain('<ul>');
 });
+
+test('code span pipes inside a native link label keep table columns intact', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = ['| label | c |', '|---|---|',
+    '| [a ' + tick + 'x|y' + tick + '](https://example.com) | last |'].join('\n');
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  const root = await page.evaluate(s => {
+    const div = document.createElement('div'); div.innerHTML = window.md2slidesMarkdown.render(s);
+    return { cells: [...div.querySelectorAll('tbody td')].map(x => x.textContent),
+      href: div.querySelector('tbody a')?.getAttribute('href') };
+  }, source);
+  expect(root).toEqual({ cells: ['a x|y', 'last'], href: 'https://example.com' });
+  expect(html).toContain('<code>x|y</code>');
+});
+
+test('code span pipes in image alt text preserve native tables and URL destinations', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = ['| image | final |', '|---|---|',
+    '| ![a ' + tick + 'x|y' + tick + '](./a\\|b.png) | yes |'].join('\n');
+  const root = await page.evaluate(s => {
+    const div = document.createElement('div'); div.innerHTML = window.md2slidesMarkdown.render(s);
+    return { count: div.querySelectorAll('tbody td').length,
+      alt: div.querySelector('tbody img')?.getAttribute('alt'),
+      src: div.querySelector('tbody img')?.getAttribute('src') };
+  }, source);
+  expect(root).toEqual({ count: 2, alt: 'a x|y', src: './a%7Cb.png' });
+});
+
+test('multiline link destinations remain native and never receive pipe sentinels', async ({ page }) => {
+  const source = '[x](a\\|b\n "title")';
+  const root = await page.evaluate(s => {
+    const div = document.createElement('div'); div.innerHTML = window.md2slidesMarkdown.render(s);
+    const a = div.querySelector('a');
+    return { href: a?.getAttribute('href'), title: a?.getAttribute('title') };
+  }, source);
+  expect(root).toEqual({ href: 'a%7Cb', title: 'title' });
+});
+
+test('multiline inline code keeps literal escaped pipes without preprocessing', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = tick + 'a\n\\| b' + tick;
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('a \\| b');
+  expect(html).not.toContain('\\uE021');
+});
