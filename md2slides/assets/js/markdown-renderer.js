@@ -54,8 +54,15 @@
         const originalChildren = token.children || [];
         // markdown-it's renderInlineAsText ignores custom token types.
         // Present opaque TeX as ordinary text when constructing image alt.
-        token.children = originalChildren.map(child => child.type === 'slide_inline_math' ?
-            { ...child, type: 'text', content: restoreMathPipes(child.content) } : child);
+        token.children = originalChildren.map(child => {
+            // Upstream's alt renderer skips code_inline as well as custom
+            // math tokens; both should contribute their literal text.
+            if (child.type === 'slide_inline_math')
+                return { ...child, type: 'text', content: restoreMathPipes(child.content) };
+            if (child.type === 'code_inline')
+                return { ...child, type: 'text' };
+            return child;
+        });
         try {
             if (!safeImage(token.attrGet('src')))
                 return escape(self.renderInlineAsText(token.children, options, env));
