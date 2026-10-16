@@ -399,7 +399,7 @@
         // Source-map lines are too coarse for display math that closes before
         // the end of a physical line. Collect exact opaque source spans so the
         // following Markdown can still participate in table pipe escaping.
-        const opaque = new Map();
+        const opaque = new Map(), tableLines = new Set();
         const addRange = (line, start, end) => {
             if (end <= start) return;
             if (!opaque.has(line)) opaque.set(line, []);
@@ -407,6 +407,10 @@
         };
         for (const token of blockTokens) {
             if (!token.map) continue;
+            if (token.type === 'table_open') {
+                for (let line = token.map[0]; line < token.map[1]; line++)
+                    tableLines.add(line);
+            }
             if (token.type === 'fence' || token.type === 'code_block') {
                 for (let line = token.map[0]; line < token.map[1]; line++)
                     addRange(line, 0, Infinity);
@@ -420,6 +424,19 @@
                 }
             }
         }
+        // Native tokens may contain code spans in *labels*, e.g. [a `x|y`](url).
+        // Only protect those code runs; leave destinations byte-for-byte intact.
+        const protectCodeOnly = fragment => {
+            let output = '';
+            for (let i = 0; i < fragment.length;) {
+                const end = codeSpanEnd(fragment, i);
+                if (end >= 0) {
+                    output += fragment.slice(i, end).replace(/\|/g, PIPE);
+                    i = end;
+                } else output += fragment[i++];
+            }
+            return output;
+        };
         const protectPlain = line => {
             let output = '';
             const probe = new md.inline.State(line, md, env, []);
@@ -432,7 +449,17 @@
                     for (const rule of nativeDestinationRules) {
                         probe.pos = i;
                         if (rule(probe, true) && probe.pos > i) {
-                            output += line.slice(i, probe.pos);
+                            // Protect label code pipes without inserting
+                            // placeholders into escaped URL destinations.
+                            const labelStart = line[i] === '!' ? i + 1 : i;
+                            const labelEnd = line[labelStart] === '[' ?
+                                md.helpers.parseLinkLabel(probe, labelStart, true) : -1;
+                            if (labelEnd >= 0 && labelEnd < probe.pos) {
+                                output += protectCodeOnly(line.slice(i, labelEnd + 1));
+                                output += line.slice(labelEnd + 1, probe.pos);
+                            } else {
+                                output += line.slice(i, probe.pos);
+                            }
                             i = probe.pos;
                             consumed = true;
                             break;
@@ -463,6 +490,9 @@
             return output;
         };
         return source.split('\n').map((line, index) => {
+            // Table pipe rewriting belongs to actual native table blocks.
+            // Never mutate paragraphs, multilined links, or code spans.
+            if (!tableLines.has(index)) return line;
             const ranges = (opaque.get(index) || []).sort((a, b) => a[0] - b[0]);
             let result = '', cursor = 0;
             for (const [from, to] of ranges) {
