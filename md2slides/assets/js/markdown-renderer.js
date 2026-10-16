@@ -489,10 +489,8 @@
             }
             return output;
         };
-        return source.split('\n').map((line, index) => {
-            // Table pipe rewriting belongs to actual native table blocks.
-            // Never mutate paragraphs, multilined links, or code spans.
-            if (!tableLines.has(index)) return line;
+        const protectSource = allowed => source.split('\n').map((line, index) => {
+            if (!allowed(index)) return line;
             const ranges = (opaque.get(index) || []).sort((a, b) => a[0] - b[0]);
             let result = '', cursor = 0;
             for (const [from, to] of ranges) {
@@ -505,6 +503,18 @@
             }
             return result + protectPlain(line.slice(cursor));
         }).join('\n');
+        // A code pipe in a TABLE HEADER can prevent the initial native parse
+        // from recognizing any table at all. Probe with a disposable protected
+        // source solely to discover table token maps, then apply protection to
+        // those native table ranges only. Non-table input remains unchanged.
+        const probeTokens = [];
+        md.block.parse(protectSource(() => true), md, {}, probeTokens);
+        for (const token of probeTokens) {
+            if (token.type !== 'table_open' || !token.map) continue;
+            for (let line = token.map[0]; line < token.map[1]; line++)
+                tableLines.add(line);
+        }
+        return protectSource(index => tableLines.has(index));
     }
 
     // This invisible synthetic boundary is created only for legacy double-
