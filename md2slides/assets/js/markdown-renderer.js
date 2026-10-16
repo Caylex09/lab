@@ -363,15 +363,31 @@
     const restoreMathPipes = src => src
         .replace(/\uE022/g, '\\\\').replace(/\uE023/g, '\\').replace(/\uE021/g, '|');
     function protectTablePipes(source, blockTokens) {
-        // Respect markdown-it source maps, including direct blockquote math.
-        const opaque = new Set();
+        // Source-map lines are too coarse for display math that closes before
+        // the end of a physical line. Collect exact opaque source spans so the
+        // following Markdown can still participate in table pipe escaping.
+        const opaque = new Map();
+        const addRange = (line, start, end) => {
+            if (end <= start) return;
+            if (!opaque.has(line)) opaque.set(line, []);
+            opaque.get(line).push([start, end]);
+        };
         for (const token of blockTokens) {
-            if (['fence', 'code_block', 'slide_math'].includes(token.type) && token.map) {
-                for (let line = token.map[0]; line < token.map[1]; line++) opaque.add(line);
+            if (!token.map) continue;
+            if (token.type === 'fence' || token.type === 'code_block') {
+                for (let line = token.map[0]; line < token.map[1]; line++)
+                    addRange(line, 0, Infinity);
+            } else if (token.type === 'slide_math') {
+                const span = token.meta?.sourceSpan;
+                for (let line = token.map[0]; line < token.map[1]; line++) {
+                    const first = line === token.map[0];
+                    const last = line === token.map[1] - 1;
+                    addRange(line, first ? (span?.startColumn ?? 0) : 0,
+                        last ? (span?.endColumn ?? Infinity) : Infinity);
+                }
             }
         }
-        return source.split('\n').map((line, index) => {
-            if (opaque.has(index)) return line;
+        const protectPlain = line => {
             let output = '';
             for (let i = 0; i < line.length;) {
                 const spanEnd = codeSpanEnd(line, i);
@@ -387,7 +403,7 @@
                         const pairs = Math.floor((end - i) / 2);
                         output += BACKSLASH_PAIR.repeat(pairs);
                         if ((end - i) % 2) output += ESCAPED_SLASH + PIPE;
-                        else output += '|'; // even escapes: ordinary table delimiter
+                        else output += '|';
                         i = end + 1;
                         continue;
                     }
@@ -395,6 +411,19 @@
                 output += line[i++];
             }
             return output;
+        };
+        return source.split('\n').map((line, index) => {
+            const ranges = (opaque.get(index) || []).sort((a, b) => a[0] - b[0]);
+            let result = '', cursor = 0;
+            for (const [from, to] of ranges) {
+                const start = Math.min(line.length, Math.max(from, cursor));
+                const finish = Math.min(line.length, to);
+                if (finish <= cursor) continue;
+                result += protectPlain(line.slice(cursor, start));
+                result += line.slice(start, finish);
+                cursor = finish;
+            }
+            return result + protectPlain(line.slice(cursor));
         }).join('\n');
     }
 
