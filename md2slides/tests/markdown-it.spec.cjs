@@ -1001,3 +1001,41 @@ test('rejected image URL still safely displays math in alt text', async ({ page 
   await expect(slide.locator(':scope > p')).toHaveText(['range ' + formula]);
   await expect(slide.locator('img')).toHaveCount(0);
 });
+
+test('an unmatched TeX interval cannot swallow a link label closer', async ({ page }) => {
+  const source = '[price $[0,1)](https://example.com/shop) then $x$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText('price $[0,1)');
+  await expect(slide.locator(':scope > p')).toHaveText(['price $[0,1) then $x$']);
+});
+
+test('an unmatched TeX interval cannot swallow an image label closer', async ({ page }) => {
+  const source = '![price $[0,1)](https://example.com/price.png) then $x$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/price.png"]'))
+    .toHaveAttribute('alt', 'price $[0,1)');
+  await expect(slide).toContainText('then $x$');
+});
+
+test('root tab-indented unordered list markers stay indented code', async ({ page }) => {
+  await page.locator('#markdownInput').fill('Intro\n\n\t- literal');
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('pre.code code')).toHaveText('- literal');
+  await expect(slide.locator('ul')).toHaveCount(0);
+});
+
+test('root tab-indented ordered list markers stay indented code', async ({ page }) => {
+  await page.locator('#markdownInput').fill('Intro\n\n\t1. literal');
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('pre.code code')).toHaveText('1. literal');
+  await expect(slide.locator('ol')).toHaveCount(0);
+});
+
+test('tab-indented markers inside a parent list still use legacy nesting', async ({ page }) => {
+  await page.locator('#markdownInput').fill('- parent\n\t- child');
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('ul > li > ul > li')).toHaveText('child');
+  await expect(slide.locator('pre.code')).toHaveCount(0);
+});
