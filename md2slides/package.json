@@ -2,7 +2,8 @@
   "name": "md2slides-smoke-tests",
   "private": true,
   "scripts": {
-    "test": "playwright test"
+    "test": "npm run check:syntax && playwright test",
+    "check:syntax": "node --check assets/js/math-plugin.js && node --check assets/js/markdown-renderer.js && node --check assets/js/index.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.55.0"
