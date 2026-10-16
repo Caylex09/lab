@@ -64,3 +64,40 @@ test('unclosed math cannot consume a reference link and the following formula', 
   expect(html).toContain('$[0,1)');
   expect(html).toContain('$x$');
 });
+
+test('single-line display math leaves trailing emphasis and links to Markdown', async ({ page }) => {
+  const html = await page.evaluate(() => window.md2slidesMarkdown.render('$$x$$ **bold** [docs](/d)'));
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toContain('<strong>bold</strong>');
+  expect(html).toContain('<a href="/d"');
+  expect(html).not.toContain('$$x$$ **bold**');
+});
+
+test('multiline display math leaves closing-line Markdown outside the formula', async ({ page }) => {
+  const source = '$$\nx+1\n$$ **bold** [docs](/d)';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<div class="katex-display-wrapper">$$\nx+1\n$$</div>');
+  expect(html).toContain('<strong>bold</strong>');
+  expect(html).toContain('<a href="/d"');
+});
+
+test('block math suffix may start a native Markdown heading', async ({ page }) => {
+  const html = await page.evaluate(() => window.md2slidesMarkdown.render('$$x$$ # Heading'));
+  expect(html).toContain('<div class="katex-display-wrapper">$$x$$</div>');
+  expect(html).toContain('<h1>Heading</h1>');
+});
+
+test('locally closed TeX can contain raw link delimiters inside a link label', async ({ page }) => {
+  const source = String.raw`[label $\left(0,1\right](x)$](/outer)`;
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<a href="/outer"');
+  expect(html).toContain(String.raw`$\left(0,1\right](x)$`);
+  expect(html).not.toContain('href="x"');
+});
+
+test('locally closed TeX with reference-like bytes remains in outer link', async ({ page }) => {
+  const source = '[label $x][ref]$](/outer)';
+  const html = await page.evaluate(s => window.md2slidesMarkdown.render(s), source);
+  expect(html).toContain('<a href="/outer"');
+  expect(html).toContain('$x][ref]$');
+});
