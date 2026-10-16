@@ -1247,3 +1247,58 @@ test('isolated private-use glyph lines remain literal Markdown paragraphs', asyn
   expect(html).toContain('<p>' + glyphs + '</p>');
   expect(html).toContain('<p>after</p>');
 });
+
+test('escaped URL pipes are normalized natively outside tables', async ({ page }) => {
+  const source = String.raw`[link](./a\|b) ![alt](./img\|icon.png)`;
+  const actual = await page.evaluate(src => {
+    const root = document.createElement('div');
+    root.innerHTML = window.md2slidesMarkdown.render(src);
+    return { href: root.querySelector('a')?.getAttribute('href'),
+      src: root.querySelector('img')?.getAttribute('src') };
+  }, source);
+  expect(actual).toEqual({ href: './a%7Cb', src: './img%7Cicon.png' });
+});
+
+test('escaped URL pipes survive a Markdown table without placeholder leakage', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = [
+    '| Link | Image | Code |',
+    '| --- | --- | --- |',
+    '| [link](./a\\|b) | ![alt](./img\\|icon.png) | ' + tick + 'x|y' + tick + ' |'
+  ].join('\n');
+  const actual = await page.evaluate(src => {
+    const root = document.createElement('div');
+    root.innerHTML = window.md2slidesMarkdown.render(src);
+    return { cells: root.querySelectorAll('td').length,
+      href: root.querySelector('a')?.getAttribute('href'),
+      src: root.querySelector('img')?.getAttribute('src'),
+      code: root.querySelector('td code')?.textContent };
+  }, source);
+  expect(actual).toEqual({ cells: 3, href: './a%7Cb',
+    src: './img%7Cicon.png', code: 'x|y' });
+});
+
+test('root-level fence clears previous ordered-list indentation ownership', async ({ page }) => {
+  const tick = String.fromCharCode(96).repeat(3);
+  const source = ['100. item', '', tick, 'code', tick, '  after'].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<pre class="code"><code>code</code></pre>');
+  expect(html).toContain('<p>after</p>');
+  expect(html).not.toContain('<code>after');
+});
+
+test('root-level tilde fence does not preserve stale list frames either', async ({ page }) => {
+  const source = ['1000. item', '', '~~~', 'code', '~~~', '  after'].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<pre class="code"><code>code</code></pre>');
+  expect(html).toContain('<p>after</p>');
+});
+
+test('normal list-owned fenced code retains its owner', async ({ page }) => {
+  const tick = String.fromCharCode(96).repeat(3);
+  const source = ['- parent', '  ' + tick, '  code', '  ' + tick, '  continuation'].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<pre class="code"><code>code</code></pre>');
+  expect(html).toContain('continuation');
+  expect(html).toContain('<ul>');
+});
