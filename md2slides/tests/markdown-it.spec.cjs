@@ -1039,3 +1039,20 @@ test('tab-indented markers inside a parent list still use legacy nesting', async
   await expect(slide.locator('ul > li > ul > li')).toHaveText('child');
   await expect(slide.locator('pre.code')).toHaveCount(0);
 });
+
+
+test('reference labels with unmatched interval markers remain links', async ({ page }) => {
+  const source = '[price $[0,1)][ref] then $x$' + '\n\n' + '[ref]: https://example.com/shop';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('a[href="https://example.com/shop"]')).toHaveText('price $[0,1)');
+  await expect(slide.locator(':scope > p')).toHaveText(['price $[0,1) then $x$']);
+});
+
+test('reference image labels with unmatched intervals preserve alt', async ({ page }) => {
+  const source = '![price $[0,1)][img] then $x$' + '\n\n' + '[img]: https://example.com/p.png';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/p.png"]')).toHaveAttribute('alt', 'price $[0,1)');
+  await expect(slide).toContainText('then $x$');
+});
