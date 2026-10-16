@@ -202,6 +202,11 @@
             if (src[i] === '[') depth++;
             else if (src[i] === ']') {
                 if (depth === 0) return false;
+                // A '](destination)' before the proposed TeX closer may
+                // be the enclosing Markdown label, not a TeX bracket. Only
+                // treat it as part of TeX when a later closing label exists.
+                if (src[i + 1] === '(' && src.indexOf('](', end + 1) < 0)
+                    return false;
                 depth--;
             }
         }
@@ -397,6 +402,15 @@
                 continue;
             }
             const match = /^([ \t]*)([-+*]|\d+[.)])(\s+.*)$/.exec(line);
+            // A tab before a root-level marker is a four-column
+            // CommonMark code indent, not a two-space legacy list marker.
+            // Inside a list, preserve tab-indented child markers.
+            if (match && match[1].includes('\t') && !ownerFor(indent(match[1]))) {
+                output.push(line);
+                frames.length = 0;
+                blankCount = 0;
+                continue;
+            }
             if (match) {
                 const depth = Math.floor(indent(match[1]) / 2);
                 const before = frames[frames.length - 1];
