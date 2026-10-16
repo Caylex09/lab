@@ -1143,3 +1143,36 @@ test('rejected image URL preserves inline code as escaped plain text', async ({ 
   await expect(slide.locator(':scope > p')).toHaveText(['safe <b>code</b>']);
   await expect(slide.locator('b')).toHaveCount(0);
 });
+
+test('native autolink text cannot end a reference image label', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '![price $[0 <https://example.com/][fake]> tail][img] then $x$',
+    '',
+    '[img]: https://example.com/price.png'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img[src="https://example.com/price.png"]'))
+    .toHaveAttribute('alt', 'price $[0 https://example.com/][fake] tail');
+  await expect(slide).toContainText('then $x$');
+});
+
+test('a native autolink cannot end a full reference link label', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '[price $[0 <https://example.com/][fake]> tail][ref] then $x$',
+    '',
+    '[ref]: https://example.com/shop'
+  ].join('\n'));
+  const slide = page.locator('#currentSlide');
+  const link = slide.locator('a[href="https://example.com/shop"]');
+  await expect(link).toContainText('price $[0');
+  await expect(link.locator('a')).toHaveCount(0);
+  await expect(slide.locator(':scope > p')).toContainText('then $x$');
+});
+
+test('math containing an autolink-like string stays in the same math span', async ({ page }) => {
+  const source = '$a <https://example.com/][fake]> + b$';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator(':scope > p')).toHaveText([source]);
+  await expect(slide.locator('a')).toHaveCount(0);
+});
