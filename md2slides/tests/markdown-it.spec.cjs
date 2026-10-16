@@ -1126,3 +1126,20 @@ test('valid half-open TeX remains opaque before later references', async ({ page
   await expect(slide.locator('a[href="https://example.com/range"]')).toHaveText('range $[0,1)$');
   await expect(slide.locator('a[href="https://example.com/later"]')).toHaveText('later');
 });
+
+test('inline code is retained in native image alt text', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  await page.locator('#markdownInput').fill('![price ' + tick + '](fake)' + tick + '](https://example.com/code.png)');
+  await expect(page.locator('#currentSlide img[src="https://example.com/code.png"]'))
+    .toHaveAttribute('alt', 'price ](fake)');
+});
+
+test('rejected image URL preserves inline code as escaped plain text', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = '![safe ' + tick + '<b>code</b>' + tick + '](javascript:alert(1))';
+  await page.locator('#markdownInput').fill(source);
+  const slide = page.locator('#currentSlide');
+  await expect(slide.locator('img')).toHaveCount(0);
+  await expect(slide.locator(':scope > p')).toHaveText(['safe <b>code</b>']);
+  await expect(slide.locator('b')).toHaveCount(0);
+});
