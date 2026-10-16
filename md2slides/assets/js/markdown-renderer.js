@@ -224,8 +224,17 @@
         // Unlike indexOf, markdown-it's posMax is an exclusive bound while
         // parsing link/image label contents.
         if (end < 0 || end + right.length > state.posMax) return false;
-        if (silent && !localMathCloser(state.src, state.pos + left.length, end))
-            return false;
+        if (silent && !localMathCloser(state.src, state.pos + left.length, end)) {
+            // The opener '$[' is not closed within this label. During
+            // markdown-it's bracket scan, skip the orphan '[' without
+            // swallowing the enclosing ](destination). During normal
+            // tokenization the unmatched opener remains ordinary Markdown.
+            const labelEnd = left === '$' && state.src[state.pos + 1] === '[' ?
+                state.src.indexOf('](', state.pos + 2) : -1;
+            if (labelEnd < 0 || labelEnd >= end) return false;
+            state.pos = labelEnd;
+            return true;
+        }
         if (!silent) {
             const token = state.push('slide_inline_math', '', 0);
             token.content = state.src.slice(state.pos, end + right.length);
