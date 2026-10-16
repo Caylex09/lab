@@ -1178,7 +1178,7 @@ test('math containing an autolink-like string stays in the same math span', asyn
 });
 
 test('authored private-use glyphs survive paragraph, code, math and table rendering', async ({ page }) => {
-  const glyphs = String.fromCharCode(0xE021, 0xE022, 0xE023);
+  const glyphs = String.fromCharCode(0xE021, 0xE022, 0xE023, 0xE030);
   const tick = String.fromCharCode(96);
   const source = [
     'Literal ' + glyphs,
@@ -1230,4 +1230,20 @@ test('marker reservation is fresh across successive Markdown renders', async ({ 
   expect(results[1]).toContain('plain ' + glyphs);
   expect(results[2]).toContain('<code>z|w</code>');
   expect(results[3]).toContain('$' + glyphs + '$');
+});
+
+test('authored legacy list-boundary glyph remains visible next to separate lists', async ({ page }) => {
+  const glyph = String.fromCharCode(0xE030);
+  const source = ['- first', '', '', '- second', '', glyph].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect((html.match(/<ul>/g) || []).length).toBe(2);
+  expect(html).toContain('<p>' + glyph + '</p>');
+});
+
+test('isolated private-use glyph lines remain literal Markdown paragraphs', async ({ page }) => {
+  const glyphs = String.fromCharCode(0xE021, 0xE022, 0xE023, 0xE030);
+  const source = ['before', '', glyphs, '', 'after'].join('\n');
+  const html = await page.evaluate(src => window.md2slidesMarkdown.render(src), source);
+  expect(html).toContain('<p>' + glyphs + '</p>');
+  expect(html).toContain('<p>after</p>');
 });
