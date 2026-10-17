@@ -115,21 +115,18 @@
     });
     md.renderer.rules.slide_pause = () => '<span class="pause-marker" data-pause="true"></span>';
 
-    // A code span is an opaque Markdown construct. Match backtick run lengths
-    // once and reuse this helper for inline TeX and pipe handling.
-    function codeSpanEnd(src, start) {
-        if (src[start] !== '\x60' || isEscaped(src, start)) return -1;
-        let at = start;
-        while (src[at] === '\x60') at++;
-        const width = at - start;
-        while (at < src.length && src[at] !== '\n') {
-            if (src[at] !== '\x60') { at++; continue; }
-            let end = at;
-            while (src[end] === '\x60') end++;
-            if (end - at === width) return end;
-            at = end;
-        }
-        return -1;
+    // Reuse native backtick run matching and its scan cache. An unmatched run
+    // still advances as a whole; retrying at every backtick repeatedly scans
+    // the rest of a long line. Keep one probe per exact label/source range.
+    const nativeBackticks = md.inline.ruler.__rules__.find(rule => rule.name === 'backticks').fn;
+    function codeSpan(probe, start) {
+        if (probe.src[start] !== '\x60' || isEscaped(probe.src, start)) return null;
+        probe.pos = start;
+        probe.pending = '';
+        probe.tokens.length = 0;
+        nativeBackticks(probe, false);
+        return { end: probe.pos,
+            matched: probe.tokens[probe.tokens.length - 1]?.type === 'code_inline' };
     }
 
     const parseInline = (state, src) => {
@@ -197,21 +194,37 @@
 
                 // The legacy editor displays indented follow-up lines as their
                 // own paragraphs; CommonMark normally soft-wraps them.
-                if (inline.content.includes('\n') && !item.split) {
-                    const lines = inline.content.split('\n');
-                    inline.content = lines.shift();
-                    inline.children = parseInline(state, inline.content).children;
-                    const remainder = lines.join(' ').trim();
+                let depth = 0;
+                const breakAt = !item.split ? inline.children.findIndex(child => {
+                    if (!depth && child.type === 'softbreak') return true;
+                    depth += child.nesting;
+                    return false;
+                }) : -1;
+                if (breakAt >= 0) {
+                    // Split already-parsed top-level lines. Source newlines
+                    // inside code, math, links or emphasis belong to those
+                    // constructs and must never be reparsed independently.
+                    const remainder = new state.Token('inline', '', 0);
+                    let remainderDepth = 0;
+                    remainder.children = inline.children.slice(breakAt + 1).map(child => {
+                        const topLevelBreak = !remainderDepth && child.type === 'softbreak';
+                        remainderDepth += child.nesting;
+                        if (!topLevelBreak) return child;
+                        const space = new state.Token('text', '', 0);
+                        space.content = ' ';
+                        return space;
+                    });
+                    inline.children = inline.children.slice(0, breakAt);
                     if (task) {
                         inline.children.unshift(htmlToken(state, '<input type="checkbox" ' +
                             (task[1].toLowerCase() === 'x' ? 'checked ' : '') + 'disabled><span>'));
                         inline.children.push(htmlToken(state, '</span>'));
                     }
-                    if (remainder && tokens[i + 2]?.type === 'paragraph_close') {
+                    if (remainder.children.length && tokens[i + 2]?.type === 'paragraph_close') {
                         output.push(token, inline, tokens[i + 2]);
                         const open = new state.Token('paragraph_open', 'p', 1);
                         open.attrSet('class', 'list-continuation');
-                        output.push(open, parseInline(state, remainder), new state.Token('paragraph_close', 'p', -1));
+                        output.push(open, remainder, new state.Token('paragraph_close', 'p', -1));
                         item.split = true;
                         i += 2;
                         continue;
@@ -263,6 +276,20 @@
     // widths. markdown-it itself owns the resulting list structure.
     function normalizeListMarkers(source) {
         const output = [], frames = [];
+        // Let the native block parser identify opaque source ranges before
+        // applying the legacy indentation convention. TeX contents cannot
+        // open fences/list frames, and root indented code is never a list.
+        const blocks = [];
+        md.block.parse(source, md, {}, blocks);
+        const mathLines = new Map(), rootCodeLines = new Set();
+        for (const token of blocks) {
+            if (!token.map || (token.type !== 'slide_math' &&
+                !(token.type === 'code_block' && token.level === 0))) continue;
+            for (let line = token.map[0]; line < token.map[1]; line++) {
+                if (token.type === 'slide_math') mathLines.set(line, token.map[0]);
+                if (token.type === 'code_block' && token.level === 0) rootCodeLines.add(line);
+            }
+        }
         let fence = null, blankCount = 0;
         const indent = line => (line.match(/^[ \t]*/) || [''])[0].replace(/\t/g, '  ').length;
         const padLine = (line, offset) => {
@@ -271,7 +298,23 @@
         };
         const ownerFor = raw => frames.slice().reverse()
             .find(frame => raw >= frame.depth * 2 + 2);
-        for (const line of source.split('\n')) {
+        for (const [lineNumber, line] of source.split('\n').entries()) {
+            if (rootCodeLines.has(lineNumber)) {
+                output.push(line);
+                frames.length = 0;
+                blankCount = 0;
+                continue;
+            }
+            const listMarker = /^([ \t]*)([-+*]|\d{1,9}[.)])([ \t]+.*)$/.exec(line);
+            if (mathLines.has(lineNumber) &&
+                (mathLines.get(lineNumber) !== lineNumber || !listMarker)) {
+                const owner = ownerFor(indent(line));
+                const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
+                output.push(owner ? padLine(line, offset) : line);
+                if (mathLines.get(lineNumber) === lineNumber && !owner) frames.length = 0;
+                blankCount = 0;
+                continue;
+            }
             const fenceMatch = /^[ \t]*(\x60{3,}|~{3,})(.*)$/.exec(line);
             // Backtick fence info strings may not contain backticks (CommonMark).
             // Otherwise a normal continuation line can swallow following items.
@@ -302,7 +345,7 @@
                 blankCount++;
                 continue;
             }
-            const match = /^([ \t]*)([-+*]|\d+[.)])(\s+.*)$/.exec(line);
+            const match = listMarker;
             // A tab before a root-level marker is a four-column
             // CommonMark code indent, not a two-space legacy list marker.
             // Inside a list, preserve tab-indented child markers.
@@ -321,7 +364,15 @@
                 while (frames.length && frames[frames.length - 1].depth >= depth) frames.pop();
                 const parent = frames[frames.length - 1];
                 const target = parent && depth ? parent.target + parent.width : depth * 2;
-                const width = match[2].length + 1;
+                // Match markdown-it's content column, including tabs and
+                // 1-4 spaces after a marker. Five or more spaces (or an empty
+                // item) use one column of padding and retain the rest as code.
+                let padding = 0;
+                const markerSpace = match[3].match(/^[ \t]+/)[0];
+                for (const char of markerSpace)
+                    padding += char === '\t' ? 4 - (target + match[2].length + padding) % 4 : 1;
+                const width = match[2].length +
+                    (padding > 4 || markerSpace.length === match[3].length ? 1 : padding);
                 // A non-1 ordered sublist may not interrupt a paragraph in
                 // CommonMark. A blank line ensures it is parsed as a list.
                 if (parent && /^\d/.test(match[2]) &&
@@ -363,7 +414,10 @@
     // table text, math, code spans, and legacy list separators.
     let LIST_BOUNDARY, PIPE, BACKSLASH_PAIR, ESCAPED_SLASH;
     function reserveSyntaxMarkers(source) {
-        const used = new Set(source);
+        // Entities can become real characters during native inline parsing.
+        // Reserve against that output as well as literal input, using the
+        // vendored parser's decoder rather than a second entity grammar.
+        const used = new Set(source + md.utils.unescapeAll(source));
         const chosen = [];
         const pick = (start, end) => {
             for (let point = start; point <= end && chosen.length < 4; point++) {
@@ -430,6 +484,10 @@
         const protectPlain = line => {
             const probe = new md.inline.State(line, md, env, []);
             const scan = (from, limit) => {
+                // Slice the range because native backtick scanning uses
+                // indexOf internally; a label cannot borrow a closer from
+                // the enclosing destination or the rest of the table row.
+                const codeProbe = new md.inline.State(line.slice(from, limit), md, env, []);
                 let output = '';
                 for (let i = from; i < limit;) {
                     if (line[i] === '[' || line[i] === '!' || line[i] === '<') {
@@ -462,10 +520,12 @@
                             continue;
                         }
                     }
-                    const spanEnd = codeSpanEnd(line, i);
-                    if (spanEnd >= 0 && spanEnd <= limit) {
-                        output += line.slice(i, spanEnd).replace(/\|/g, PIPE);
-                        i = spanEnd;
+                    const span = codeSpan(codeProbe, i - from);
+                    if (span) {
+                        const end = from + span.end;
+                        const content = line.slice(i, end);
+                        output += span.matched ? content.replace(/\|/g, PIPE) : content;
+                        i = end;
                         continue;
                     }
                     if (line[i] === '\\') {
@@ -510,6 +570,15 @@
             if (token.type !== 'table_open' || !token.map) continue;
             for (let line = token.map[0]; line < token.map[1]; line++)
                 tableLines.add(line);
+        }
+        if (!tableLines.size) return source;
+        // Shortcut/collapsed references use their visible label as identity.
+        // Protecting a code/escaped pipe changes that label's lookup key;
+        // register the equivalent native reference without changing its URL.
+        for (const [label, reference] of Object.entries(env.references || {})) {
+            if (!label.includes('|')) continue;
+            const alias = md.utils.normalizeReference(protectPlain(label));
+            if (alias !== label && !env.references[alias]) env.references[alias] = reference;
         }
         return protectSource(index => tableLines.has(index));
     }

@@ -1471,3 +1471,78 @@ test('outer link labels still reject nested native links and protect code pipes'
   expect(result.cells[1]).toBe('end');
   expect(result.links).not.toContain('/outer');
 });
+
+test('editor preview keeps numeric entities distinct from protected table pipes', async ({ page }) => {
+  const glyphs = String.fromCodePoint(0xE022, 0xE023, 0xE000);
+  await page.locator('#markdownInput').fill([
+    'Entities: &#xE022;&#xE023;&#xE000;',
+    '',
+    '| entities | code | escaped |',
+    '| --- | --- | --- |',
+    '| &#xE022;&#xE023;&#xE000; | `x|y` | a\\|b |'
+  ].join('\n'));
+  await expect(page.locator('#currentSlide > p').filter({ hasText: 'Entities:' })).toHaveText('Entities: ' + glyphs);
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('tbody td')).toHaveText([glyphs, 'x|y', 'a|b']);
+  await expect(table.locator('tbody td code')).toHaveText('x|y');
+  await expect(page.locator('#currentSlide .pause-marker')).toHaveCount(0);
+});
+
+test('task list keeps multiline emphasis links titles and code in their original DOM', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- [x] **strong',
+    '  across** [linked',
+    '  label](./path "title',
+    '  across") `code',
+    '  across`',
+    '  continuation after constructs',
+    '- Sibling'
+  ].join('\n'));
+  const task = page.locator('#currentSlide > ul.task-list > li.task-item');
+  await expect(task).toHaveCount(1);
+  await expect(task.locator('input[type="checkbox"]')).toBeChecked();
+  await expect(task.locator('input[type="checkbox"]')).toBeDisabled();
+  await expect(task.locator('strong')).toHaveText('strong across');
+  await expect(task.locator('a')).toHaveText('linked label');
+  await expect(task.locator('a')).toHaveAttribute('href', './path');
+  await expect(task.locator('a')).toHaveAttribute('title', 'title\nacross');
+  await expect(task.locator('code')).toHaveText('code across');
+  await expect(task.locator(':scope > p.list-continuation')).toHaveText('continuation after constructs');
+  await expect(task.locator('p p')).toHaveCount(0);
+  await expect(page.locator('#currentSlide > ul > li').last()).toHaveText('Sibling');
+});
+
+test('display math tilde lines preserve following ordered children and root indented code', async ({ page }) => {
+  const source = [
+    '$$',
+    'x',
+    '~~~',
+    'y',
+    '$$',
+    '',
+    '    root code',
+    '',
+    '1000. Parent',
+    '  - Child',
+    '    child detail',
+    '1001. Sibling'
+  ].join('\n');
+  const result = await page.evaluate(src => {
+    const root = document.createElement('div');
+    root.innerHTML = window.md2slidesMarkdown.render(src);
+    const items = root.querySelectorAll(':scope > ol > li');
+    return {
+      formula: root.querySelector('.katex-display-wrapper')?.textContent.trim(),
+      rootCode: root.querySelector(':scope > pre.code > code')?.textContent,
+      orderedStart: root.querySelector(':scope > ol')?.getAttribute('start'),
+      items: items.length,
+      child: items[0]?.querySelector(':scope > ul > li')?.textContent.trim(),
+      sibling: items[1]?.textContent.trim(),
+      extraFences: root.querySelectorAll('pre.code').length
+    };
+  }, source);
+  expect(result).toEqual({
+    formula: '$$\nx\n~~~\ny\n$$', rootCode: 'root code', orderedStart: '1000', items: 2,
+    child: 'Childchild detail', sibling: 'Sibling', extraFences: 1
+  });
+});

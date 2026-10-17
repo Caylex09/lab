@@ -41,6 +41,13 @@ and escaped/code-span pipe protection for tables. Display math is parsed
 directly inside lists and quotes, not turned into temporary code fences.
 External syntax rendering (KaTeX and Mermaid) remains in the slide runtime.
 
+Compatibility transforms respect native block ranges and inline tokens:
+code/math contents cannot change list state, and continuation paragraphs only
+split at top-level soft breaks. Temporary table markers are reserved against
+both authored characters and native entity decoding; shortcut/collapsed
+references retain their identity when their labels contain protected pipes.
+Math probes share range-specific skip caches and honor container boundaries.
+
 The vendored Markdown parser and math extension are local scripts; core
 Markdown preview does not require a CDN. Link/image URL protocols remain
 restricted at render time. The legacy two-space-or-one-tab list presentation
@@ -63,6 +70,12 @@ npm install
 npx playwright install chromium
 npm test
 ```
+
+`npm run test:parser` runs dependency-free Node tests before browser tests.
+They compare character preservation against the vendored parser, cover every
+BMP private-use entity plus supplementary fallback, and check list/table/math
+interactions. Adversarial math cases run with a VM timeout to catch runaway
+probing and stack growth without hanging the test process.
 
 The browser tests also verify the markdown-it adapter, including list continuations, nested code/math blocks, task items, table cell parsing, code fence boundaries, nested `\\pause`, Markdown link parsing, Mermaid/URL HTML safety, image-only progressive steps, and empty-draft persistence, and PDF export lifecycle handling. Tests stub CDN dependencies so that they can run without external asset requests.
 

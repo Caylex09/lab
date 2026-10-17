@@ -11,7 +11,7 @@
         const escape = md.utils.escapeHtml;
     // Block display math consumes exactly through its closing delimiter.
     // Any suffix is parsed as Markdown blocks, not escaped as TeX content.
-    md.block.ruler.before('fence', 'slide_math', (state, start, end, silent) => {
+    function consumeMath(state, start, end, silent) {
         const line = n => state.src.slice(
             state.bMarks[n] + state.tShift[n], state.eMarks[n]).trim();
         const first = line(start);
@@ -20,8 +20,14 @@
         const right = left === '$$' ? '$$' : '\\]';
         let last = start;
         let closeAt = first.indexOf(right, left.length);
-        while (closeAt < 0 && ++last < end)
+        while (closeAt < 0 && ++last < end) {
+            // A list's block tokenizer sees following sibling/root lines too.
+            // Math must stop where that container ends, like a native fence.
+            // Whitespace-only body lines may be unindented and remain opaque.
+            if (state.sCount[last] < state.blkIndent &&
+                state.bMarks[last] + state.tShift[last] < state.eMarks[last]) return false;
             closeAt = line(last).indexOf(right);
+        }
         if (closeAt < 0 || last >= end) return false;
         if (silent) return true;
 
@@ -34,11 +40,6 @@
         token.block = true;
         token.map = [start, last + 1];
 
-        // The suffix is part of the SAME Markdown document. Re-tokenize
-        // its virtual start on the closing line together with following
-        // physical lines, using the current block state and nesting context.
-        // A fresh block.parse(suffix) would lose setext underlines, reference
-        // continuations, list ownership and blockquote indentation.
         const original = state.src.slice(
             state.bMarks[last] + state.tShift[last], state.eMarks[last]);
         const leading = original.length - original.trimStart().length;
@@ -57,15 +58,29 @@
             startColumn: physicalColumn(firstContent),
             endColumn: physicalColumn(suffixStart)
         } };
-        const suffix = state.src.slice(suffixStart, state.eMarks[last]);
-        if (suffix.trim()) {
-            const saved = {
-                begin: state.bMarks[last],
-                shift: state.tShift[last],
-                spaces: state.sCount[last],
-                bs: state.bsCount[last]
-            };
-            try {
+        return { last, suffixStart,
+            suffix: state.src.slice(suffixStart, state.eMarks[last]) };
+    }
+    md.block.ruler.before('fence', 'slide_math', (state, start, end, silent) => {
+        let math = consumeMath(state, start, end, silent);
+        if (!math || silent) return !!math;
+
+        // Keep suffixes in the same block state: setext underlines, reference
+        // continuations and container ownership may depend on following lines.
+        // Consume consecutive math suffixes iteratively, then dispatch just one
+        // native block. The outer tokenizer handles the remaining document;
+        // recursively tokenizing all of it grows the stack for sibling math.
+        const saved = [];
+        try {
+            while (math) {
+                const { last, suffixStart, suffix } = math;
+                if (!suffix.trim()) {
+                    state.line = last + 1;
+                    break;
+                }
+                saved.push({ line: last, begin: state.bMarks[last],
+                    shift: state.tShift[last], spaces: state.sCount[last],
+                    bs: state.bsCount[last] });
                 state.bMarks[last] = suffixStart;
                 state.tShift[last] = suffix.length - suffix.trimStart().length;
                 // Tabs in a suffix retain CommonMark's four-column widths.
@@ -74,15 +89,22 @@
                     columns += suffix[i] === '\t' ? 4 - columns % 4 : 1;
                 state.sCount[last] = columns;
                 state.bsCount[last] = 0;
-                state.md.block.tokenize(state, last, end);
-            } finally {
-                state.bMarks[last] = saved.begin;
-                state.tShift[last] = saved.shift;
-                state.sCount[last] = saved.spaces;
-                state.bsCount[last] = saved.bs;
+                state.line = last;
+                math = consumeMath(state, last, end, false);
+                if (math) continue;
+                const matched = state.md.block.ruler.getRules('')
+                    .some(rule => rule(state, last, end, false));
+                if (!matched || state.line <= last)
+                    throw new Error('Math suffix block did not advance');
             }
-        } else {
-            state.line = last + 1;
+        } finally {
+            for (let i = saved.length - 1; i >= 0; i--) {
+                const value = saved[i];
+                state.bMarks[value.line] = value.begin;
+                state.tShift[value.line] = value.shift;
+                state.sCount[value.line] = value.spaces;
+                state.bsCount[value.line] = value.bs;
+            }
         }
         return true;
     }, { alt: ['paragraph', 'list'] });
@@ -104,10 +126,28 @@
         }
         return at;
     }
+    // A probe belongs to the current inline parse. Reuse native skip decisions
+    // when a label parser calls back into this extension; independent caches
+    // repeat those same scans exponentially for math-like bracket/link text.
+    // Probe ranges can end inside a formula, so keep their caches separate
+    // from the real parse and from probes with another range/nesting budget.
+    function inlineProbe(state, limit) {
+        const probe = new state.constructor(state.src, state.md, state.env, []);
+        probe.posMax = limit;
+        probe.level = state.level;
+        probe.linkLevel = state.linkLevel;
+        const caches = state.slideMathProbeCaches ||
+            (state.slideMathProbeCaches = new Map());
+        const key = limit + ':' + state.level + ':' + state.linkLevel;
+        if (!caches.has(key)) caches.set(key, {});
+        probe.cache = caches.get(key);
+        probe.slideMathProbeCaches = caches;
+        return probe;
+    }
     function closingDollar(state) {
         const src = state.src, start = state.pos;
         if (src[start] !== '$' || src[start + 1] === '$') return -1;
-        const probe = new state.constructor(src, state.md, state.env, []);
+        const probe = inlineProbe(state, state.posMax);
         // Link/image labels narrow posMax while markdown-it parses their text.
         // Never let a math closer or a probed inline rule read past that range.
         probe.posMax = state.posMax;
@@ -139,8 +179,7 @@
     // opaque; Markdown link/reference parsing still belongs to markdown-it.
     function inspectMathLabel(state, begin, end) {
         const src = state.src;
-        const probe = new state.constructor(src, state.md, state.env, []);
-        probe.posMax = end;
+        const probe = inlineProbe(state, end);
         const opaque = [opaqueInlineRules[0], opaqueInlineRules[3], opaqueInlineRules[1], opaqueInlineRules[2]];
         let depth = 0;
         // When a closed formula ends immediately before the enclosing link's
