@@ -1427,15 +1427,15 @@ test('nested Markdown link in image alt preserves code pipe and escaped image UR
       last: div.querySelectorAll('tbody td')[1]?.textContent,
       src: div.querySelector('tbody img')?.getAttribute('src'),
       expectedSrc: upstream.querySelector('img')?.getAttribute('src'),
-      alt: div.querySelector('tbody img')?.getAttribute('alt'),
-      expectedAlt: upstream.querySelector('img')?.getAttribute('alt') };
+      alt: div.querySelector('tbody img')?.getAttribute('alt') };
   }, { image, table });
   expect(result.count).toBe(2);
   expect(result.last).toBe('yes');
   expect(result.src).toBe('./a%7Cb.png');
   expect(result.src).toBe(result.expectedSrc);
-  expect(result.alt).toBe(result.expectedAlt);
-  expect(result.alt).toContain('x|y');
+  // The slide renderer intentionally retains inline-code text in image alt;
+  // upstream markdown-it's default alt serializer omits code_inline text.
+  expect(result.alt).toBe('alt inner x|y');
 });
 
 test('reference image label containing a nested reference link keeps table columns', async ({ page }) => {
