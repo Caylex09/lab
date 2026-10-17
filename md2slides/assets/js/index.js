@@ -20,9 +20,55 @@
         next: $('#nextBtn'),
         fullscreenTop: $('#fullscreenTop'),
         saveContent: $('#saveContent'),
+        storageStatus: $('#storageStatus'),
         exportBtnImg: $('#exportPdfImg'),
         exportBtnPrint: $('#exportPdfPrint'),
         stageWrapper: document.querySelector('.stage-wrapper'),
+    };
+
+    const storageFailures = new Set();
+    function recordStorageResult(operation, key, success) {
+        const failure = operation + ':' + key;
+        if (success) storageFailures.delete(failure);
+        else storageFailures.add(failure);
+        if (!dom.storageStatus) return;
+        dom.storageStatus.hidden = storageFailures.size === 0;
+        if (!storageFailures.size) {
+            dom.storageStatus.textContent = '';
+        } else if (storageFailures.has('write:m2s-markdown-content')) {
+            dom.storageStatus.textContent = 'Draft could not be saved to browser storage. Copy your Markdown before closing this tab.';
+        } else if (storageFailures.has('read:m2s-markdown-content')) {
+            dom.storageStatus.textContent = 'Saved draft could not be read. Automatic saving is paused to protect it. Copy your Markdown or choose Save to replace the saved draft.';
+        } else if ([...storageFailures].some(failure => failure.startsWith('read:'))) {
+            dom.storageStatus.textContent = 'Browser storage could not be read. Saved drafts or settings may be unavailable. Copy your Markdown before closing this tab.';
+        } else {
+            dom.storageStatus.textContent = 'Some settings could not be saved to browser storage. Changes may be lost when you close this tab.';
+        }
+    }
+
+    // Storage access itself can throw, including during startup. Keep editing
+    // available and clear only the failure addressed by a successful retry.
+    const safeStorage = {
+        getItem(key) {
+            try {
+                const value = window.localStorage.getItem(key);
+                recordStorageResult('read', key, true);
+                return value;
+            } catch {
+                recordStorageResult('read', key, false);
+                return null;
+            }
+        },
+        setItem(key, value) {
+            try {
+                window.localStorage.setItem(key, value);
+                recordStorageResult('write', key, true);
+                return true;
+            } catch {
+                recordStorageResult('write', key, false);
+                return false;
+            }
+        }
     };
 
     const SAMPLE = `# Markdown → Slides
@@ -242,7 +288,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     let exportingPdf = false; // 防止重复导出
 
     // Setup theme from preference/localStorage
-    const savedTheme = localStorage.getItem('m2s-theme');
+    const savedTheme = safeStorage.getItem('m2s-theme');
     const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
     const normalizedSaved = (savedTheme === 'corporate') ? null : savedTheme;
     const initialTheme = normalizedSaved || 'light';
@@ -250,7 +296,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     dom.themeSelect.value = initialTheme;
 
     // 自动保存功能：从 localStorage 恢复内容
-    const savedContent = localStorage.getItem('m2s-markdown-content');
+    const savedContent = safeStorage.getItem('m2s-markdown-content');
+    let draftAutosaveEnabled = !storageFailures.has('read:m2s-markdown-content');
     if (savedContent !== null) {
         dom.markdown.value = savedContent;
     } else {
@@ -260,14 +307,16 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     // 自动保存功能：每10秒保存一次到 localStorage
     setInterval(() => {
+        if (!draftAutosaveEnabled) return;
         const content = dom.markdown.value;
-        localStorage.setItem('m2s-markdown-content', content);
+        safeStorage.setItem('m2s-markdown-content', content);
     }, 10000); // 10秒
 
     // 页面卸载时也保存一次
     window.addEventListener('beforeunload', () => {
+        if (!draftAutosaveEnabled) return;
         const content = dom.markdown.value;
-        localStorage.setItem('m2s-markdown-content', content);
+        safeStorage.setItem('m2s-markdown-content', content);
     });
 
     // Render initial
@@ -284,14 +333,20 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
     // 保存按钮功能
     if (dom.saveContent) {
+        const originalText = dom.saveContent.textContent;
+        let saveFeedbackTimer;
         dom.saveContent.addEventListener('click', () => {
             const content = dom.markdown.value;
-            localStorage.setItem('m2s-markdown-content', content);
+            clearTimeout(saveFeedbackTimer);
+            dom.saveContent.textContent = originalText;
+            dom.saveContent.style.opacity = '1';
+            if (!safeStorage.setItem('m2s-markdown-content', content)) return;
+            draftAutosaveEnabled = true;
+            recordStorageResult('read', 'm2s-markdown-content', true);
             // 视觉反馈：临时改变按钮文本
-            const originalText = dom.saveContent.textContent;
             dom.saveContent.textContent = 'Saved!';
             dom.saveContent.style.opacity = '0.7';
-            setTimeout(() => {
+            saveFeedbackTimer = setTimeout(() => {
                 dom.saveContent.textContent = originalText;
                 dom.saveContent.style.opacity = '1';
             }, 1000);
@@ -491,7 +546,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     // 在 setTheme 函数中添加代码高亮主题切换
     function setTheme(theme) {
         document.documentElement.setAttribute('data-theme', theme);
-        localStorage.setItem('m2s-theme', theme);
+        safeStorage.setItem('m2s-theme', theme);
 
         // 切换代码高亮主题
         const highlightLight = document.getElementById('highlightLightTheme');
@@ -1611,7 +1666,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     const watermarkInput = document.getElementById('watermarkInput');
 
     // 页面加载时从 localStorage 恢复水印
-    const savedWatermark = localStorage.getItem('m2s-watermark');
+    const savedWatermark = safeStorage.getItem('m2s-watermark');
     if (savedWatermark && watermarkInput) {
         watermarkInput.value = savedWatermark;
     }
@@ -1628,7 +1683,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         watermarkSave.addEventListener('click', () => {
             // 保存水印到 localStorage
             if (watermarkInput) {
-                localStorage.setItem('m2s-watermark', watermarkInput.value);
+                safeStorage.setItem('m2s-watermark', watermarkInput.value);
             }
             watermarkModal.style.display = 'none';
         });
@@ -1642,7 +1697,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
         watermarkInput.addEventListener('keydown', (e) => {
             if (e.key === 'Escape') watermarkModal.style.display = 'none';
             if (e.key === 'Enter') {
-                localStorage.setItem('m2s-watermark', watermarkInput.value);
+                safeStorage.setItem('m2s-watermark', watermarkInput.value);
                 watermarkModal.style.display = 'none';
             }
         });
