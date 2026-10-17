@@ -1413,3 +1413,61 @@ test('nested image destination behavior matches unmodified markdown-it', async (
   }, body);
   expect(compared.slide).toEqual(compared.upstream);
 });
+
+test('nested Markdown link in image alt preserves code pipe and escaped image URL', async ({ page }) => {
+  const tick = String.fromCharCode(96), slash = String.fromCharCode(92);
+  const image = '![alt [inner](/u) ' + tick + 'x|y' + tick + '](./a' + slash + '|b.png)';
+  const table = ['| image | final |', '|---|---|', '| ' + image + ' | yes |'].join('\n');
+  const result = await page.evaluate(({ image, table }) => {
+    const div = document.createElement('div');
+    const upstream = document.createElement('div');
+    upstream.innerHTML = window.markdownit({ html: false }).render(image);
+    div.innerHTML = window.md2slidesMarkdown.render(table);
+    return { count: div.querySelectorAll('tbody td').length,
+      last: div.querySelectorAll('tbody td')[1]?.textContent,
+      src: div.querySelector('tbody img')?.getAttribute('src'),
+      expectedSrc: upstream.querySelector('img')?.getAttribute('src'),
+      alt: div.querySelector('tbody img')?.getAttribute('alt'),
+      expectedAlt: upstream.querySelector('img')?.getAttribute('alt') };
+  }, { image, table });
+  expect(result.count).toBe(2);
+  expect(result.last).toBe('yes');
+  expect(result.src).toBe('./a%7Cb.png');
+  expect(result.src).toBe(result.expectedSrc);
+  expect(result.alt).toBe(result.expectedAlt);
+  expect(result.alt).toContain('x|y');
+});
+
+test('reference image label containing a nested reference link keeps table columns', async ({ page }) => {
+  const tick = String.fromCharCode(96), slash = String.fromCharCode(92);
+  const image = '![alt [inner][ref] ' + tick + 'x|y' + tick + '][img]';
+  const source = ['| image | final |', '|---|---|', '| ' + image + ' | yes |',
+    '', '[ref]: /u', '[img]: ./a' + slash + '|b.png'].join('\n');
+  const result = await page.evaluate(src => {
+    const div = document.createElement('div');
+    div.innerHTML = window.md2slidesMarkdown.render(src);
+    return { count: div.querySelectorAll('tbody td').length,
+      last: div.querySelectorAll('tbody td')[1]?.textContent,
+      alt: div.querySelector('tbody img')?.getAttribute('alt'),
+      src: div.querySelector('tbody img')?.getAttribute('src') };
+  }, source);
+  expect(result.count).toBe(2);
+  expect(result.last).toBe('yes');
+  expect(result.alt).toContain('x|y');
+  expect(result.src).toBe('./a%7Cb.png');
+});
+
+test('outer link labels still reject nested native links and protect code pipes', async ({ page }) => {
+  const tick = String.fromCharCode(96);
+  const source = ['| label | other |', '|---|---|',
+    '| [outer [inner](/u) ' + tick + 'x|y' + tick + '](/outer) | end |'].join('\n');
+  const result = await page.evaluate(src => {
+    const div = document.createElement('div');
+    div.innerHTML = window.md2slidesMarkdown.render(src);
+    return { cells: [...div.querySelectorAll('tbody td')].map(x => x.textContent),
+      links: [...div.querySelectorAll('tbody a')].map(x => x.getAttribute('href')) };
+  }, source);
+  expect(result.cells.length).toBe(2);
+  expect(result.cells[1]).toBe('end');
+  expect(result.links).not.toContain('/outer');
+});
