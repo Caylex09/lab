@@ -47,6 +47,10 @@ split at top-level soft breaks. Temporary table markers are reserved against
 both authored characters and native entity decoding; shortcut/collapsed
 references retain their identity when their labels contain protected pipes.
 Math probes share range-specific skip caches and honor container boundaries.
+List-owned indented code is rebuilt from native token content so marker-like
+code remains opaque. A display-math closing line may also open a list or code
+fence: compatibility processing follows its exact source spans while keeping
+the physical suffix and its native indentation/code-block priority intact.
 
 The vendored Markdown parser and math extension are local scripts; core
 Markdown preview does not require a CDN. Link/image URL protocols remain

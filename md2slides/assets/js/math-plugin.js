@@ -90,7 +90,10 @@
                 state.sCount[last] = columns;
                 state.bsCount[last] = 0;
                 state.line = last;
-                math = consumeMath(state, last, end, false);
+                // Indented code precedes math in the native block ruler.
+                // A virtual suffix keeps that priority, including tabs.
+                math = state.sCount[last] - state.blkIndent < 4 &&
+                    consumeMath(state, last, end, false);
                 if (math) continue;
                 const matched = state.md.block.ruler.getRules('')
                     .some(rule => rule(state, last, end, false));

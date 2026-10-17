@@ -157,3 +157,62 @@ test('table pipe protection preserves shortcut and collapsed reference identity'
   const unsafe = render('| a | b |\n| --- | --- |\n| [a `x|y`] | last |\n\n[a `x|y`]: javascript:alert(1)');
   assert.ok(!unsafe.includes('<a '), unsafe);
 });
+
+test('list-owned indented code stays opaque to marker normalization', () => {
+  const fixtures = [
+    '- parent\n\n      alpha\n      10. literal\n        continuation\n\n- next',
+    '- outer\n  - parent\n\n        alpha\n        10. literal\n          continuation\n\n  - next',
+    '100. parent\n\n         alpha\n         10. literal\n           continuation\n\n101. next',
+    '> - parent\n>\n>       alpha\n>       10. literal\n>         continuation\n>\n> - next'
+  ];
+  const codes = html => [...html.matchAll(/<pre[^>]*><code[^>]*>([\s\S]*?)<\/code><\/pre>/g)]
+    .map(match => match[1].replace(/\n$/, ''));
+  for (const source of fixtures) {
+    const actual = render(source);
+    assert.deepEqual(codes(actual), codes(native.render(source)), source + '\n' + actual);
+    assert.ok(actual.includes('next'), actual);
+  }
+  const legacy = render('- parent\n      10. child\n- next');
+  assert.ok(legacy.includes('<ol start="10">'), legacy);
+});
+
+test('math suffix fences keep raw code and following sibling ownership', () => {
+  for (const prefix of ['', '- ', '100. ']) {
+    const source = prefix + '$$x$$```js\n10. literal\n  continuation\n```\n' +
+      (prefix ? '- next\n  - child' : 'after');
+    const html = render(source);
+    assert.ok(html.includes('<code class="language-js">10. literal\n  continuation</code>'), source + '\n' + html);
+    if (prefix) assert.ok(html.includes('</li>\n</' + (prefix === '- ' ? 'ul' : 'ol') + '>') || html.includes('</li>\n<li>next'), html);
+    assert.ok(html.includes(prefix ? 'next\n<ul>\n<li>child</li>' : '<p>after</p>'), html);
+  }
+});
+
+test('math suffix ordered lists preserve legacy nested children', () => {
+  for (const source of [
+    '$$x$$10. parent\n  - child\n11. next',
+    '- $$x$$10. parent\n    - child\n- next',
+    '$$a$$$$b$$100. parent\n  - child\n101. next',
+    '- $$a$$10. $$b$$100. parent\n      - child\n- next'
+  ]) {
+    const html = render(source);
+    assert.ok(html.includes('parent\n<ul>\n<li>child</li>\n</ul>'), source + '\n' + html);
+    assert.ok(html.includes('next'), html);
+  }
+});
+
+test('quoted math suffixes do not leak list or fence state outside the quote', () => {
+  const source = '> $$x$$~~~js\n> 10. literal\n>   continuation\n> ~~~\n\n10. parent\n  - child\n11. next';
+  const html = render(source);
+  assert.ok(html.includes('<blockquote>'), html);
+  assert.ok(html.includes('<code class="language-js">10. literal\n  continuation</code>'), html);
+  assert.ok(html.includes('parent\n<ul>\n<li>child</li>\n</ul>'), html);
+  assert.ok(html.includes('</blockquote>\n<ol start="10">'), html);
+});
+
+test('a second formula cannot expose the first formula closing line as a list', () => {
+  const source = '- $$\n  10. literal$$ $$b$$';
+  const html = render(source);
+  assert.ok(html.includes('<div class="katex-display-wrapper">$$\n10. literal$$</div>'), html);
+  assert.equal((html.match(/class="katex-display-wrapper"/g) || []).length, 2, html);
+  assert.ok(!html.includes('<ol'), html);
+});

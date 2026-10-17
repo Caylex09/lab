@@ -1546,3 +1546,68 @@ test('display math tilde lines preserve following ordered children and root inde
     child: 'Childchild detail', sibling: 'Sibling', extraFences: 1
   });
 });
+
+test('list-owned indented code keeps marker-looking lines in one preview code block', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '- parent',
+    '',
+    '      alpha',
+    '      10. literal',
+    '        continuation',
+    '',
+    '- next'
+  ].join('\n'));
+  const code = page.locator('#currentSlide > ul > li').first().locator(':scope > pre.code > code');
+  await expect(code).toHaveText('alpha\n10. literal\n  continuation', { useInnerText: false });
+  expect(await code.textContent()).toBe('alpha\n10. literal\n  continuation');
+  await expect(page.locator('#currentSlide pre.code')).toHaveCount(1);
+  await expect(page.locator('#currentSlide ol')).toHaveCount(0);
+  await expect(page.locator('#currentSlide > ul > li')).toHaveCount(2);
+  await expect(page.locator('#currentSlide > ul > li').last()).toHaveText('next');
+});
+
+test('same-line display math suffixes preserve fence text and following list ownership', async ({ page }) => {
+  const fixtures = {
+    rootFence: '$$x$$~~~js\n10. literal\n  continuation\n~~~\nafter',
+    listFence: '- $$x$$~~~js\n10. literal\n  continuation\n~~~\n- next\n  - child',
+    ordered: '$$x$$1000. parent\n  - child\n1001. next'
+  };
+  const result = await page.evaluate(sources => {
+    const render = src => {
+      const root = document.createElement('div');
+      root.innerHTML = window.md2slidesMarkdown.render(src);
+      return root;
+    };
+    const rootFence = render(sources.rootFence);
+    const listFence = render(sources.listFence);
+    const ordered = render(sources.ordered);
+    const items = listFence.querySelectorAll(':scope > ul > li');
+    const orderedItems = ordered.querySelectorAll(':scope > ol > li');
+    return {
+      root: {
+        code: rootFence.querySelector(':scope > pre.code > code')?.textContent,
+        codeCount: rootFence.querySelectorAll('pre.code').length,
+        after: rootFence.querySelector(':scope > p')?.textContent
+      },
+      list: {
+        items: items.length,
+        code: items[0]?.querySelector(':scope > pre.code > code')?.textContent,
+        codeCount: listFence.querySelectorAll('pre.code').length,
+        next: items[1]?.firstChild?.textContent.trim(),
+        child: items[1]?.querySelector(':scope > ul > li')?.textContent.trim()
+      },
+      ordered: {
+        start: ordered.querySelector(':scope > ol')?.getAttribute('start'),
+        lists: ordered.querySelectorAll(':scope > ol').length,
+        items: orderedItems.length,
+        child: orderedItems[0]?.querySelector(':scope > ul > li')?.textContent.trim(),
+        next: orderedItems[1]?.textContent.trim()
+      }
+    };
+  }, fixtures);
+  expect(result).toEqual({
+    root: { code: '10. literal\n  continuation', codeCount: 1, after: 'after' },
+    list: { items: 2, code: '10. literal\n  continuation', codeCount: 1, next: 'next', child: 'child' },
+    ordered: { start: '1000', lists: 1, items: 2, child: 'child', next: 'next' }
+  });
+});

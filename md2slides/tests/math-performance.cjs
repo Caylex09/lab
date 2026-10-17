@@ -141,3 +141,25 @@ test('table code probes preserve run widths, escapes and nested label ranges', (
     assert.ok(html.includes('<td>tail</td>'), html);
   }
 });
+
+test('indented math-like suffixes keep native code-block priority', () => {
+  const wrappers = [source => source, source => '> ' + source,
+    source => '- ' + source, source => '- parent\n  - ' + source];
+  for (const formula of ['$$literal$$', '\\[literal\\]']) {
+    for (const wrap of wrappers) {
+      const html = render(wrap('$$x$$    ' + formula));
+      assert.equal((html.match(/class="katex-display-wrapper"/g) || []).length, 1, html);
+      assert.ok(html.includes('<pre class="code"><code>' + formula + '</code></pre>'), html);
+      const ordinary = render(wrap('$$x$$   ' + formula));
+      assert.equal((ordinary.match(/class="katex-display-wrapper"/g) || []).length, 2, ordinary);
+      assert.ok(!ordinary.includes('<pre'), ordinary);
+    }
+    for (const prefix of ['', '> ']) {
+      const html = render(prefix + '$$x$$\t' + formula);
+      assert.equal((html.match(/class="katex-display-wrapper"/g) || []).length, 1, html);
+      assert.ok(html.includes('<pre class="code"><code>' + formula + '</code></pre>'), html);
+    }
+  }
+  const continued = render('$$x$$    $$literal$$\n    next line');
+  assert.ok(continued.includes('<pre class="code"><code>$$literal$$\nnext line</code></pre>'), continued);
+});

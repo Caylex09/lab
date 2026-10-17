@@ -276,21 +276,75 @@
     // widths. markdown-it itself owns the resulting list structure.
     function normalizeListMarkers(source) {
         const output = [], frames = [];
+        // A closing math delimiter can share its physical line with another
+        // native block. Process that suffix as a virtual line, then join its
+        // output back without the owning container's synthetic indentation.
+        let joinBase = -1;
+        const emit = (...values) => {
+            for (const value of values) {
+                if (joinBase >= 0) {
+                    if (!value) continue;
+                    const leading = value.match(/^ */)[0].length;
+                    output[output.length - 1] += value.slice(Math.min(leading, joinBase));
+                    joinBase = -1;
+                } else output.push(value);
+            }
+        };
         // Let the native block parser identify opaque source ranges before
         // applying the legacy indentation convention. TeX contents cannot
         // open fences/list frames, and root indented code is never a list.
         const blocks = [];
         md.block.parse(source, md, {}, blocks);
-        const mathLines = new Map(), rootCodeLines = new Set();
+        const sourceLines = source.split('\n');
+        const mathLines = new Map(), mathEnds = new Map(), codeLines = new Map();
+        const nativeItems = [];
+        let quoteDepth = 0;
         for (const token of blocks) {
-            if (!token.map || (token.type !== 'slide_math' &&
-                !(token.type === 'code_block' && token.level === 0))) continue;
-            for (let line = token.map[0]; line < token.map[1]; line++) {
-                if (token.type === 'slide_math') mathLines.set(line, token.map[0]);
-                if (token.type === 'code_block' && token.level === 0) rootCodeLines.add(line);
+            if (token.type === 'list_item_open') nativeItems.push(token);
+            if (token.type === 'list_item_close') nativeItems.pop();
+            if (token.type === 'blockquote_open') quoteDepth++;
+            if (token.type === 'blockquote_close') quoteDepth--;
+            if (!token.map) continue;
+            const owner = nativeItems[nativeItems.length - 1];
+            if (token.type === 'slide_math') {
+                for (let line = token.map[0]; line < token.map[1]; line++)
+                    mathLines.set(line, token.map[0]);
+                // Quote markers already keep their contents outside the
+                // unquoted legacy list/fence scanner. Retain those bytes.
+                if (!quoteDepth && token.meta?.sourceSpan) {
+                    const line = token.map[1] - 1;
+                    if (!mathEnds.has(line)) mathEnds.set(line, []);
+                    mathEnds.get(line).push({ token, owner });
+                }
+            }
+            if (token.type === 'code_block' && !quoteDepth) {
+                // A deeply indented marker as the FIRST code line remains a
+                // legacy child list. Once ordinary code opens the block, all
+                // following marker-like lines belong to that opaque block.
+                if (owner && /^[ \t]*(?:[-+*]|\d{1,9}[.)])(?:[ \t]+|$)/.test(
+                    token.content.split('\n')[0])) continue;
+                const content = token.content.replace(/\n$/, '').split('\n');
+                for (let line = token.map[0]; line < token.map[1]; line++)
+                    codeLines.set(line, { token, owner, content: content[line - token.map[0]] || '' });
             }
         }
-        let fence = null, blankCount = 0;
+        const records = [];
+        for (const [lineNumber, line] of sourceLines.entries()) {
+            let cursor = 0, previous = null;
+            const endings = (mathEnds.get(lineNumber) || []).sort((a, b) =>
+                a.token.meta.sourceSpan.endColumn - b.token.meta.sourceSpan.endColumn);
+            for (const math of endings) {
+                const column = math.token.meta.sourceSpan.endColumn;
+                records.push({ lineNumber, text: line.slice(cursor, column), math,
+                    join: cursor > 0, previous });
+                cursor = column;
+                previous = math;
+            }
+            if (cursor < line.length || !cursor)
+                records.push({ lineNumber, text: line.slice(cursor),
+                    suffix: cursor > 0, join: cursor > 0, previous });
+        }
+        let fence = null, blankCount = 0, consumedFenceLine = -1;
         const indent = line => (line.match(/^[ \t]*/) || [''])[0].replace(/\t/g, '  ').length;
         const padLine = (line, offset) => {
             const leading = indent(line);
@@ -298,20 +352,68 @@
         };
         const ownerFor = raw => frames.slice().reverse()
             .find(frame => raw >= frame.depth * 2 + 2);
-        for (const [lineNumber, line] of source.split('\n').entries()) {
-            if (rootCodeLines.has(lineNumber)) {
-                output.push(line);
-                frames.length = 0;
+        const nativeOwnerFrame = owner => owner && frames.slice().reverse()
+            .find(frame => frame.sourceLine === owner.map[0]);
+        for (const record of records) {
+            const { lineNumber } = record;
+            if (lineNumber === consumedFenceLine) continue;
+            let line = record.text;
+            if (fence) {
+                // Legacy list fences can own unindented raw body lines that
+                // the initial native parse sees as unrelated code or math.
+                // An active fence owns each complete physical line first.
+                line = sourceLines[lineNumber];
+                const closer = /^[ \t]*(\x60{3,}|~{3,})[ \t]*$/.exec(line);
+                const isClosing = closer && closer[1][0] === fence.char &&
+                    closer[1].length >= fence.size;
+                if (isClosing) {
+                    emit(fence.suffix ? ' '.repeat(fence.ownerIndent) + line.trimStart() :
+                        fence.ownerIndent ? padLine(line, fence.offset) : line);
+                    fence = null;
+                } else {
+                    // Supply the owning content prefix separately so native
+                    // fence de-indentation preserves the raw code bytes.
+                    emit(fence.ownerIndent ?
+                        ' '.repeat(fence.ownerIndent) + line : line);
+                }
+                consumedFenceLine = lineNumber;
+                continue;
+            }
+            if (record.join) {
+                const math = record.previous;
+                const owner = nativeOwnerFrame(math.owner) ||
+                    ownerFor(indent(sourceLines[math.token.map[0]]));
+                const rawBase = owner ? owner.depth * 2 + 2 : 0;
+                joinBase = owner ? owner.target + owner.width : 0;
+                line = ' '.repeat(rawBase) + line;
+            }
+            const code = codeLines.get(lineNumber);
+            const itemLead = code?.owner?.map[0] === lineNumber &&
+                code.token.map[0] === lineNumber && !record.suffix;
+            if (code && !record.math && !itemLead) {
+                const owner = nativeOwnerFrame(code.owner);
+                if (code.owner && owner) {
+                    // Rebuild only the container/code indentation. Native
+                    // token content retains the authored relative whitespace.
+                    emit(' '.repeat(owner.target + owner.width + 4) + code.content);
+                } else {
+                    emit(line);
+                    frames.length = 0;
+                }
                 blankCount = 0;
                 continue;
             }
             const listMarker = /^([ \t]*)([-+*]|\d{1,9}[.)])([ \t]+.*)$/.exec(line);
-            if (mathLines.has(lineNumber) &&
-                (mathLines.get(lineNumber) !== lineNumber || !listMarker)) {
+            // Two formulas can share a closing/opening physical line. Each
+            // exact segment belongs to its own math token, rather than the
+            // last formula recorded for that whole source line.
+            const mathStart = record.math?.token.map[0] ?? mathLines.get(lineNumber);
+            if (!record.suffix && mathStart !== undefined &&
+                (mathStart !== lineNumber || !listMarker)) {
                 const owner = ownerFor(indent(line));
                 const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
-                output.push(owner ? padLine(line, offset) : line);
-                if (mathLines.get(lineNumber) === lineNumber && !owner) frames.length = 0;
+                emit(owner ? padLine(line, offset) : line);
+                if (mathStart === lineNumber && !owner) frames.length = 0;
                 blankCount = 0;
                 continue;
             }
@@ -321,27 +423,8 @@
             const marker = fenceMatch &&
                 (fenceMatch[1][0] !== '\x60' || !fenceMatch[2].includes('\x60')) ?
                 [fenceMatch[0], fenceMatch[1]] : null;
-            if (fence) {
-                const isClosing = marker && marker[1][0] === fence.char &&
-                    marker[1].length >= fence.size &&
-                    /^[ \t]*(?:\x60{3,}|~{3,})[ \t]*$/.test(line);
-                if (isClosing) {
-                    // Align the closer with the transformed opening marker,
-                    // rather than indenting it like a literal code-body line.
-                    output.push(fence.ownerIndent ? padLine(line, fence.offset) : line);
-                    fence = null;
-                } else {
-                    // markdown-it removes an owning list item's entire content
-                    // indentation from fenced lines. Supply that exact prefix
-                    // separately, so the following raw bytes (including tabs)
-                    // survive untouched inside the final <code> element.
-                    output.push(fence.ownerIndent ?
-                        ' '.repeat(fence.ownerIndent) + line : line);
-                }
-                continue;
-            }
             if (!line.trim()) {
-                output.push(line);
+                emit(line);
                 blankCount++;
                 continue;
             }
@@ -350,7 +433,7 @@
             // CommonMark code indent, not a two-space legacy list marker.
             // Inside a list, preserve tab-indented child markers.
             if (match && match[1].includes('\t') && !ownerFor(indent(match[1]))) {
-                output.push(line);
+                emit(line);
                 frames.length = 0;
                 blankCount = 0;
                 continue;
@@ -377,16 +460,16 @@
                 // CommonMark. A blank line ensures it is parsed as a list.
                 if (parent && /^\d/.test(match[2]) &&
                     parseInt(match[2], 10) !== 1 && output[output.length - 1]?.trim())
-                    output.push('');
-                output.push(' '.repeat(target) + match[2] + match[3]);
-                frames.push({ depth, target, width });
+                    emit('');
+                emit(' '.repeat(target) + match[2] + match[3]);
+                frames.push({ depth, target, width, sourceLine: lineNumber });
             } else {
                 const owner = ownerFor(indent(line));
                 if (owner && owner !== frames[frames.length - 1]) {
                     // A dedented continuation belongs to an ancestor after a
                     // child list. Separate the child list and parent's next
                     // paragraph instead of using CommonMark lazy continuation.
-                    if (output[output.length - 1]?.trim()) output.push('');
+                    if (output[output.length - 1]?.trim()) emit('');
                     frames.length = frames.indexOf(owner) + 1;
                 }
                 // A fence with no owning list is a CommonMark root block.
@@ -395,10 +478,11 @@
                 if (marker && !owner) frames.length = 0;
                 const offset = owner ? (owner.target + owner.width) - (owner.depth * 2 + 2) : 0;
                 // Preserve root-level Tab indentation used by CommonMark code blocks.
-                output.push(owner ? padLine(line, offset) : line);
+                emit(owner ? padLine(line, offset) : line);
                 if (!indent(line) && !marker) frames.length = 0;
                 if (marker) fence = { char: marker[1][0], size: marker[1].length,
-                    offset, ownerIndent: owner ? owner.target + owner.width : 0 };
+                    offset, ownerIndent: owner ? owner.target + owner.width : 0,
+                    suffix: !!record.suffix };
             }
             blankCount = 0;
         }
