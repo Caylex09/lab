@@ -433,12 +433,13 @@
                 let output = '';
                 for (let i = from; i < limit;) {
                     if (line[i] === '[' || line[i] === '!' || line[i] === '<') {
-                        let matchEnd = -1;
+                        let matchEnd = -1, matchedRule = null;
                         for (const rule of nativeDestinationRules) {
                             probe.pos = i;
                             probe.posMax = limit;
                             if (rule(probe, true) && probe.pos > i && probe.pos <= limit) {
                                 matchEnd = probe.pos;
+                                matchedRule = rule;
                                 break;
                             }
                         }
@@ -447,7 +448,7 @@
                             // markdown-it allows links inside image labels but
                             // rejects nested links inside ordinary link labels.
                             // Mirror the native rule's parseLinkLabel argument.
-                            const disableNested = rule !== nativeDestinationRules[1];
+                            const disableNested = matchedRule !== nativeDestinationRules[1];
                             const labelEnd = line[labelStart] === '[' ?
                                 md.helpers.parseLinkLabel(probe, labelStart, disableNested) : -1;
                             if (labelEnd >= 0 && labelEnd < matchEnd) {
