@@ -216,3 +216,69 @@ test('a second formula cannot expose the first formula closing line as a list', 
   assert.equal((html.match(/class="katex-display-wrapper"/g) || []).length, 2, html);
   assert.ok(!html.includes('<ol'), html);
 });
+
+test('full reference labels keep code and escaped pipes inside their table cell', () => {
+  for (const label of ['a `x|y`', 'a \\| b', 'a ``x|`y``', 'a \\[inner\\] `x|y`']) {
+    for (const image of ['', '!']) {
+      const outside = native.render(image + '[text][' + label + ']\n\n[' + label + ']: /dest');
+      assert.ok(outside.includes(image ? 'src="/dest"' : 'href="/dest"'), outside);
+      for (const visible of ['text', 'text `p|q`']) {
+        const source = ['| value | final |', '| --- | --- |', '| ' + image + '[' + visible + '][' + label + '] | yes |', '', '[' + label + ']: /dest "title"'].join('\n');
+        const html = render(source);
+        assert.equal((html.match(/<td>/g) || []).length, 2, source + '\n' + html);
+        assert.ok(html.includes(image ? 'src="/dest"' : 'href="/dest"'), source + '\n' + html);
+        assert.ok(html.includes('title="title"'), html);
+        assert.ok(html.includes('<td>yes</td>'), html);
+        if (image) assert.ok(html.includes('alt="' + visible.replace(/`/g, '') + '"'), html);
+      }
+    }
+  }
+});
+
+test('protected explicit references discover table headers and keep native normalized identity', () => {
+  for (const image of ['', '!']) {
+    const source = ['| ' + image + '[text][A `X|Y`] | final |', '| --- | --- |', '| one | two |', '', '[a `x|y`]: /dest'].join('\n');
+    for (const quote of ['', '> ']) {
+      const html = render(quote ? source.split('\n').map(line => quote + line).join('\n') : source);
+      assert.equal((html.match(/<th>/g) || []).length, 2, html);
+      assert.equal((html.match(/<td>/g) || []).length, 2, html);
+      assert.ok(html.includes(image ? 'src="/dest"' : 'href="/dest"'), html);
+      if (quote) assert.ok(html.includes('<blockquote>'), html);
+    }
+  }
+});
+
+test('reference-label protection retains URL opacity, undefined references and URL safety', () => {
+  const inline = render('| A | B |\n| --- | --- |\n| [text](./a\\|b "title \\| pipe") ![alt](./a\\|b.png "image \\| pipe") | yes |');
+  assert.ok(inline.includes('href="./a%7Cb"'), inline);
+  assert.ok(inline.includes('src="./a%7Cb.png"'), inline);
+  assert.ok(inline.includes('title="title | pipe"'), inline);
+  assert.ok(inline.includes('title="image | pipe"'), inline);
+  assert.ok(inline.includes('<td>yes</td>'), inline);
+
+  const unresolved = render('| A | B |\n| --- | --- |\n| [text][missing `x|y`] | yes |\n\n[text]: /shortcut');
+  assert.ok(!unresolved.includes('<a '), unresolved);
+  assert.ok(unresolved.includes('[text][missing <code>x|y</code>]'), unresolved);
+  assert.ok(unresolved.includes('<td>yes</td>'), unresolved);
+
+  for (const image of ['', '!']) {
+    const unsafe = render('| A | B |\n| --- | --- |\n| ' + image + '[text][a `x|y`] | yes |\n\n[a `x|y`]: javascript:alert(1)');
+    assert.ok(!unsafe.includes('<a ') && !unsafe.includes('<img '), unsafe);
+    assert.ok(unsafe.includes('<td>yes</td>'), unsafe);
+  }
+});
+
+test('explicit reference protection retains its range after nested visible labels', () => {
+  for (const cell of [
+    '[![icon](/icon.png)][a `x|y`]',
+    '![alt [nested](/u)][a `x|y`]',
+    '![alt ![nested](/icon.png)][a `x|y`]'
+  ]) {
+    const definition = '\n\n[a `x|y`]: /dest';
+    const outside = render(cell + definition).match(/<p>([\s\S]*?)<\/p>/)[1];
+    const html = render('| A | B |\n| --- | --- |\n| ' + cell + ' | yes |' + definition);
+    assert.ok(outside.includes('/dest'), outside);
+    assert.ok(html.includes('<td>' + outside + '</td>'), html);
+    assert.ok(html.includes('<td>yes</td>'), html);
+  }
+});

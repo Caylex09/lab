@@ -44,8 +44,9 @@ External syntax rendering (KaTeX and Mermaid) remains in the slide runtime.
 Compatibility transforms respect native block ranges and inline tokens:
 code/math contents cannot change list state, and continuation paragraphs only
 split at top-level soft breaks. Temporary table markers are reserved against
-both authored characters and native entity decoding; shortcut/collapsed
-references retain their identity when their labels contain protected pipes.
+both authored characters and native entity decoding; reference links/images
+retain their identity when either a visible or explicit label contains
+protected pipes, including full, collapsed and shortcut reference forms.
 Math probes share range-specific skip caches and honor container boundaries.
 List-owned indented code is rebuilt from native token content so marker-like
 code remains opaque. A display-math closing line may also open a list or code

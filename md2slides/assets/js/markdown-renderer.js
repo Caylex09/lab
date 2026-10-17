@@ -596,7 +596,23 @@
                             if (labelEnd >= 0 && labelEnd < matchEnd) {
                                 output += line.slice(i, labelStart + 1);
                                 output += scan(labelStart + 1, labelEnd);
-                                output += line.slice(labelEnd, matchEnd);
+                                // Native full references have a second label,
+                                // distinct from an inline URL/title. Its code
+                                // and escaped pipes need the same protection
+                                // and normalized reference alias as the first.
+                                const referenceStart = labelEnd + 1;
+                                // Recursive visible-label scans narrow this
+                                // shared probe; the reference is outside it.
+                                probe.posMax = limit;
+                                const referenceEnd = line[referenceStart] === '[' ?
+                                    md.helpers.parseLinkLabel(probe, referenceStart, false) : -1;
+                                if (referenceEnd >= 0 && referenceEnd + 1 === matchEnd) {
+                                    output += line.slice(labelEnd, referenceStart + 1);
+                                    output += scan(referenceStart + 1, referenceEnd);
+                                    output += line.slice(referenceEnd, matchEnd);
+                                } else {
+                                    output += line.slice(labelEnd, matchEnd);
+                                }
                             } else {
                                 output += line.slice(i, matchEnd);
                             }
@@ -656,7 +672,7 @@
                 tableLines.add(line);
         }
         if (!tableLines.size) return source;
-        // Shortcut/collapsed references use their visible label as identity.
+        // References use either their visible label or an explicit second one.
         // Protecting a code/escaped pipe changes that label's lookup key;
         // register the equivalent native reference without changing its URL.
         for (const [label, reference] of Object.entries(env.references || {})) {

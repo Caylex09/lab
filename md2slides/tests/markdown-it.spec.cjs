@@ -1611,3 +1611,59 @@ test('same-line display math suffixes preserve fence text and following list own
     ordered: { start: '1000', lists: 1, items: 2, child: 'child', next: 'next' }
   });
 });
+
+test('editor table full reference labels keep code and escaped pipes without shifting cells', async ({ page }) => {
+  await page.locator('#markdownInput').fill([
+    '| Link | Image | Kind | Final |',
+    '| --- | --- | --- | --- |',
+    '| [code link][a `x|y`] | ![code image][img `i|j`] | code | final-code |',
+    '| [escaped link][a \\| b] | ![escaped image][img \\| ref] | escaped | final-escaped |',
+    '',
+    '[a `x|y`]: ./code-docs "code link title"',
+    '[img `i|j`]: ./code-image.png "code image title"',
+    '[a \\| b]: ./escaped-docs "escaped link title"',
+    '[img \\| ref]: ./escaped-image.png "escaped image title"'
+  ].join('\n'));
+  const table = page.locator('#currentSlide table.md-table');
+  await expect(table.locator('th')).toHaveText(['Link', 'Image', 'Kind', 'Final']);
+  const rows = table.locator('tbody tr');
+  await expect(rows).toHaveCount(2);
+  for (const [index, kind] of ['code', 'escaped'].entries()) {
+    const cells = rows.nth(index).locator('td');
+    await expect(cells).toHaveCount(4);
+    await expect(cells.nth(0).locator('a')).toHaveText(kind + ' link');
+    await expect(cells.nth(0).locator('a')).toHaveAttribute('href', './' + kind + '-docs');
+    await expect(cells.nth(0).locator('a')).toHaveAttribute('title', kind + ' link title');
+    await expect(cells.nth(1).locator('img')).toHaveAttribute('src', './' + kind + '-image.png');
+    await expect(cells.nth(1).locator('img')).toHaveAttribute('alt', kind + ' image');
+    await expect(cells.nth(1).locator('img')).toHaveAttribute('title', kind + ' image title');
+    await expect(cells.nth(2)).toHaveText(kind);
+    await expect(cells.nth(3)).toHaveText('final-' + kind);
+  }
+  await page.locator('#markdownInput').fill([
+    '| Value | Final |',
+    '| --- | --- |',
+    '| [![icon](/icon.png)][a `x|y`] | final-linked-image |',
+    '| ![alt [nested](/u)][a `x|y`] | final-image-link-alt |',
+    '| ![alt ![nested](/icon.png)][a `x|y`] | final-image-image-alt |',
+    '',
+    '[a `x|y`]: /dest'
+  ].join('\n'));
+  await expect(table.locator('th')).toHaveText(['Value', 'Final']);
+  await expect(rows).toHaveCount(3);
+  const linkedImageCells = rows.nth(0).locator('td');
+  await expect(linkedImageCells).toHaveCount(2);
+  await expect(linkedImageCells.nth(0).locator('a')).toHaveAttribute('href', '/dest');
+  await expect(linkedImageCells.nth(0).locator('a > img')).toHaveAttribute('src', '/icon.png');
+  await expect(linkedImageCells.nth(0).locator('a > img')).toHaveAttribute('alt', 'icon');
+  await expect(linkedImageCells.nth(1)).toHaveText('final-linked-image');
+  for (const [index, final] of ['final-image-link-alt', 'final-image-image-alt'].entries()) {
+    const cells = rows.nth(index + 1).locator('td');
+    await expect(cells).toHaveCount(2);
+    await expect(cells.nth(0).locator('img')).toHaveCount(1);
+    await expect(cells.nth(0).locator('img')).toHaveAttribute('src', '/dest');
+    await expect(cells.nth(0).locator('img')).toHaveAttribute('alt', 'alt nested');
+    await expect(cells.nth(0).locator('a')).toHaveCount(0);
+    await expect(cells.nth(1)).toHaveText(final);
+  }
+});
