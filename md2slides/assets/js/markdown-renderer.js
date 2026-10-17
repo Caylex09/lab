@@ -444,8 +444,12 @@
                         }
                         if (matchEnd >= 0) {
                             const labelStart = line[i] === '!' ? i + 1 : i;
+                            // markdown-it allows links inside image labels but
+                            // rejects nested links inside ordinary link labels.
+                            // Mirror the native rule's parseLinkLabel argument.
+                            const disableNested = rule !== nativeDestinationRules[1];
                             const labelEnd = line[labelStart] === '[' ?
-                                md.helpers.parseLinkLabel(probe, labelStart, true) : -1;
+                                md.helpers.parseLinkLabel(probe, labelStart, disableNested) : -1;
                             if (labelEnd >= 0 && labelEnd < matchEnd) {
                                 output += line.slice(i, labelStart + 1);
                                 output += scan(labelStart + 1, labelEnd);
