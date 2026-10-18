@@ -9,6 +9,28 @@
     'use strict';
     window.md2slidesMathPlugin = function (md, options) {
         const escape = md.utils.escapeHtml;
+    // Literal closer positions depend only on this parse's immutable source,
+    // not on native list/quote indentation or a temporary math-suffix view.
+    // Index once so repeated unmatched openers never rescan the same suffix.
+    function literalCloser(state, right, from, limit) {
+        const indexes = state.slideMathLiteralClosers ||
+            (state.slideMathLiteralClosers = new Map());
+        if (!indexes.has(right)) {
+            const positions = [];
+            for (let at = state.src.indexOf(right); at >= 0;
+                at = state.src.indexOf(right, at + 1)) positions.push(at);
+            indexes.set(right, positions);
+        }
+        const positions = indexes.get(right);
+        let low = 0, high = positions.length;
+        while (low < high) {
+            const middle = (low + high) >>> 1;
+            if (positions[middle] < from) low = middle + 1;
+            else high = middle;
+        }
+        const at = positions[low];
+        return at !== undefined && at + right.length <= limit ? at : -1;
+    }
     // Block display math consumes exactly through its closing delimiter.
     // Any suffix is parsed as Markdown blocks, not escaped as TeX content.
     function consumeMath(state, start, end, silent) {
@@ -18,6 +40,19 @@
         const left = first.startsWith('$$') ? '$$' : first.startsWith('\\[') ? '\\[' : null;
         if (!left) return false;
         const right = left === '$$' ? '$$' : '\\]';
+        const firstRaw = state.src.slice(
+            state.bMarks[start] + state.tShift[start], state.eMarks[start]);
+        const firstContent = state.bMarks[start] + state.tShift[start] +
+            (firstRaw.length - firstRaw.trimStart().length);
+        const searchFrom = firstContent + left.length;
+        const rawClose = literalCloser(state, right, searchFrom, state.eMarks[end - 1]);
+        if (rawClose < 0) return false;
+        const failed = state.slideMathDedentFailures?.get(right);
+        if (failed && searchFrom >= failed.from && start < failed.line &&
+            failed.line < end && rawClose >= failed.boundary &&
+            state.sCount[failed.line] < state.blkIndent &&
+            state.bMarks[failed.line] + state.tShift[failed.line] < state.eMarks[failed.line])
+            return false;
         let last = start;
         let closeAt = first.indexOf(right, left.length);
         while (closeAt < 0 && ++last < end) {
@@ -25,7 +60,21 @@
             // Math must stop where that container ends, like a native fence.
             // Whitespace-only body lines may be unindented and remain opaque.
             if (state.sCount[last] < state.blkIndent &&
-                state.bMarks[last] + state.tShift[last] < state.eMarks[last]) return false;
+                state.bMarks[last] + state.tShift[last] < state.eMarks[last]) {
+                // A later physical closer cannot close math across a dedent.
+                // Reuse that witness only while the SAME boundary still ends
+                // the current container, with no raw closer before it. Native
+                // quote/list/suffix views may change, so recheck both facts.
+                const boundary = state.src.lastIndexOf('\n', state.eMarks[last] - 1) + 1;
+                if (rawClose >= boundary) {
+                    const failures = state.slideMathDedentFailures ||
+                        (state.slideMathDedentFailures = new Map());
+                    const previous = failures.get(right);
+                    failures.set(right, { line: last, boundary,
+                        from: previous?.line === last ? Math.min(previous.from, searchFrom) : searchFrom });
+                }
+                return false;
+            }
             closeAt = line(last).indexOf(right);
         }
         if (closeAt < 0 || last >= end) return false;
@@ -48,10 +97,6 @@
         // Exact physical-source offsets are consumed by table pipe
         // protection. A closing line can contain ordinary Markdown after
         // the math delimiter; token.map alone marks that whole line.
-        const firstRaw = state.src.slice(
-            state.bMarks[start] + state.tShift[start], state.eMarks[start]);
-        const firstContent = state.bMarks[start] + state.tShift[start] +
-            (firstRaw.length - firstRaw.trimStart().length);
         const physicalColumn = at => at -
             (state.src.lastIndexOf('\n', at - 1) + 1);
         token.meta = { sourceSpan: {
@@ -145,6 +190,10 @@
         if (!caches.has(key)) caches.set(key, {});
         probe.cache = caches.get(key);
         probe.slideMathProbeCaches = caches;
+        // Source facts can be shared with probes even though native skip
+        // decisions remain isolated by range and nesting above.
+        probe.slideMathLiteralClosers = state.slideMathLiteralClosers ||
+            (state.slideMathLiteralClosers = new Map());
         return probe;
     }
     function closingDollar(state) {
@@ -223,7 +272,7 @@
         if (!left) return false;
         const right = left === '\\(' ? '\\)' : left === '\\[' ? '\\]' : '$';
         const end = left === '$' ? closingDollar(state) :
-            state.src.indexOf(right, state.pos + left.length);
+            literalCloser(state, right, state.pos + left.length, state.posMax);
         // Unlike indexOf, markdown-it's posMax is an exclusive bound while
         // parsing link/image label contents.
         if (end < 0 || end + right.length > state.posMax) return false;

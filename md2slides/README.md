@@ -48,6 +48,12 @@ both authored characters and native entity decoding; reference links/images
 retain their identity when either a visible or explicit label contains
 protected pipes, including full, collapsed and shortcut reference forms.
 Math probes share range-specific skip caches and honor container boundaries.
+Unclosed math uses parse-local literal closer indexes, including inline fallback,
+so repeated openers do not rescan the remaining document. A cached dedent failure
+is reused only after checking that the current container still ends there and no
+physical closer occurs before it; quote/list and virtual-suffix views cannot turn
+that failure into a document-wide missing-closer result. Regression tests bound
+both block-parser work and execution time for thousands of unmatched openers.
 List-owned indented code is rebuilt from native token content so marker-like
 code remains opaque. A display-math closing line may also open a list or code
 fence: compatibility processing follows its exact source spans while keeping

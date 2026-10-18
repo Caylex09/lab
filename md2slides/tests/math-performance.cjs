@@ -17,6 +17,110 @@ vm.runInContext(`
 `, browser);
 const render = source => browser.md2slidesMarkdown.render(source);
 
+test('unclosed display-math probes have bounded block work, including dedent failures', () => {
+  const lines = 1000;
+  for (const source of [
+    '\\[ x\n'.repeat(lines),
+    '- \\[\n' + '  \\[ x\n'.repeat(lines) + '\nOutside\n\\]\n',
+  ]) {
+    browser.source = source;
+    const result = vm.runInContext(`(() => {
+      const md = markdownit({ html: false, linkify: false, breaks: false });
+      md.use(md2slidesMathPlugin, { renderInlineMath: x => md.utils.escapeHtml(x) });
+      const mathRule = md.block.ruler.__rules__.find(rule => rule.name === 'slide_math').fn;
+      const states = new WeakSet();
+      let reads = 0;
+      md.block.ruler.at('slide_math', (state, ...args) => {
+        if (!states.has(state)) {
+          states.add(state);
+          state.sCount = new Proxy(state.sCount, {
+            get(target, key, receiver) {
+              if (typeof key === 'string' && /^\\d+$/.test(key)) reads++;
+              return Reflect.get(target, key, receiver);
+            }
+          });
+        }
+        return mathRule(state, ...args);
+      }, { alt: ['paragraph', 'list'] });
+      return { html: md.render(source), reads };
+    })()`, browser, { timeout: 2000 });
+    assert.ok(result.html === browser.native.render(source), 'unclosed math changed native output');
+    assert.ok(result.reads < lines * 40, 'block indentation reads: ' + result.reads);
+  }
+});
+
+test('thousands of unclosed display and inline openers retain native output without freezing', () => {
+  const count = 4000;
+  for (const source of [
+    '\\[ x\n'.repeat(count),
+    '> \\[ x\n'.repeat(count),
+    '- \\[\n' + '  \\[ x\n'.repeat(count),
+    '- \\[\n' + '  \\[ x\n'.repeat(count) + '\nOutside\n\\]\n',
+    'text ' + '\\( x '.repeat(count),
+    'text ' + '\\[ x '.repeat(count),
+  ]) {
+    browser.source = source;
+    const expected = browser.native.render(source);
+    const plugin = vm.runInContext('withMath.render(source)', browser, { timeout: 2000 });
+    const adapter = vm.runInContext('md2slidesMarkdown.render(source)', browser, { timeout: 2000 });
+    assert.ok(plugin === expected, 'unclosed math changed native output: ' + source.slice(0, 40));
+    if (!source.startsWith('- ')) assert.ok(adapter === expected, 'unclosed math changed adapter output');
+    else {
+      assert.ok(!adapter.includes('katex-display-wrapper'), adapter.slice(0, 200));
+      assert.equal((adapter.match(/\[ x/g) || []).length, count);
+      assert.equal((adapter.match(/<ul>/g) || []).length, 1);
+    }
+  }
+});
+
+test('block closer facts honor the current end, container and virtual line view', () => {
+  const result = vm.runInContext(`(() => {
+    const md = markdownit();
+    md.use(md2slidesMathPlugin, { renderInlineMath: x => md.utils.escapeHtml(x) });
+    const rule = md.block.ruler.__rules__.find(item => item.name === 'slide_math').fn;
+    const state = new md.block.State('  \\\\[a\\n  x\\n\\\\]\\n  \\\\]\\n', md, {}, []);
+    state.blkIndent = 0;
+    const shortEnd = rule(state, 0, 2, true);
+    const fullEnd = rule(state, 0, 4, true);
+    state.blkIndent = 2;
+    const dedent = rule(state, 0, 4, true);
+    state.blkIndent = 0;
+    const rootView = rule(state, 0, 4, true);
+    state.blkIndent = 2;
+    state.bMarks[2] = state.eMarks[2];
+    state.tShift[2] = 0;
+    const emptyBoundaryView = rule(state, 0, 4, true);
+    // A virtual opener can begin one dollar into an already-indexed run.
+    const dollars = new md.block.State('$$$$$', md, {}, []);
+    const firstRun = rule(dollars, 0, 1, true);
+    dollars.bMarks[0] = 1;
+    const overlappingRun = rule(dollars, 0, 1, true);
+    return [shortEnd, fullEnd, dedent, rootView, emptyBoundaryView, firstRun, overlappingRun];
+  })()`, browser);
+  assert.deepEqual(Array.from(result), [false, true, false, true, true, true, true]);
+});
+
+test('closer indexes preserve suffixes and remain isolated across repeated document renders', () => {
+  const fixtures = [
+    ['\\[unfinished', 0, '<p>[unfinished</p>'],
+    ['\\[a\\] \\[unfinished', 1, '<p>[unfinished</p>'],
+    ['$$a$$\\[b\\]', 2, '>\\[b\\]</div>'],
+    ['\\[a\\]$$b$$', 2, '>$$b$$</div>'],
+    ['- \\[bad\n  x\n\nOutside\n\\[root\\]', 1, '</ul>\n<p>Outside</p>'],
+    ['> \\[bad\n> \\[ x\n\n\\[root\\]', 1, '</blockquote>\n<div class="katex-display-wrapper">\\[root\\]</div>'],
+    ['- \\[bad\n- \\[sibling\\]', 1, '>\\[sibling\\]</div>'],
+    ['- parent\n  - \\[\n\n    x\n\n    \\] **tail**', 1, '<strong>tail</strong>'],
+  ];
+  for (let repeat = 0; repeat < 2; repeat++) {
+    for (const [source, count, needle] of fixtures) {
+      for (const html of [browser.withMath.render(source), render(source)]) {
+        assert.equal((html.match(/class="katex-display-wrapper"/g) || []).length, count, source);
+        assert.ok(html.includes(needle), source + '\n' + html);
+      }
+    }
+  }
+});
+
 test('nested math-like link labels have bounded work in the plugin and adapter', () => {
   // Before probe memoization, even 30 repetitions take seconds and doubling
   // this input prevents the editor's main thread from returning. VM timeout
