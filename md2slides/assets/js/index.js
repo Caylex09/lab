@@ -562,6 +562,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     }
 
     function handleKey(e) {
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         const key = e.key;
         if (key === 'ArrowRight' || key === 'PageDown' || key === ' ') { e.preventDefault(); nextSlide(); }
         else if (key === 'ArrowLeft' || key === 'PageUp') { e.preventDefault(); prevSlide(); }
