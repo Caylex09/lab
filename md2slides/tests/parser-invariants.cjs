@@ -282,3 +282,53 @@ test('explicit reference protection retains its range after nested visible label
     assert.ok(html.includes('<td>yes</td>'), html);
   }
 });
+
+test('slide source ranges map legacy inserted lines back to authored fence boundaries', () => {
+  const source = ['10. parent', '  3. child', '    ```js', '    ---',
+    '    ```', '---', '# Next'].join('\n');
+  const ranges = browser.md2slidesMarkdown.getSlideSourceRanges(source);
+  assert.deepEqual(Array.from(ranges.separators), [5]);
+  assert.deepEqual(JSON.parse(JSON.stringify(ranges.fences)), [{ start: 2, end: 5 }]);
+});
+
+test('slide range probes restore containers and keep the previous separator contract', () => {
+  for (const [source, separators] of [
+    ['> ```text\n> code\n---\n# Next', [2]],
+    ['    ~~~\n---\n# Next', [1]],
+    ['    alpha\n    ---\n    beta\n---\n# Next', [1, 3]],
+    ['$$x$$ ```text\n---\n```\n---\n# Next', [3]],
+    ['- item\n  ---\n    ~~~\n---\n# Next', [1, 3]]
+  ]) {
+    const ranges = browser.md2slidesMarkdown.getSlideSourceRanges(source);
+    assert.deepEqual(Array.from(ranges.separators), separators, source);
+  }
+});
+
+test('a thousand short slides have bounded source indexing work', () => {
+  const measured = { URL, location: { origin: 'https://slides.test' } };
+  measured.window = measured;
+  vm.createContext(measured);
+  vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/js/vendor/markdown-it.min.js'), 'utf8'), measured);
+  vm.runInContext(`
+    const nativeFactory = window.markdownit;
+    window.blockSourceBytes = 0;
+    window.markdownit = (...args) => {
+      const parser = nativeFactory(...args), NativeState = parser.block.State;
+      parser.block.State = function (source, ...rest) {
+        window.blockSourceBytes += source.length;
+        return new NativeState(source, ...rest);
+      };
+      return parser;
+    };
+  `, measured);
+  for (const file of ['math-plugin.js', 'markdown-renderer.js'])
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../assets/js', file), 'utf8'), measured);
+  measured.deckSource = Array.from({ length: 1000 }, (_, i) => '# Slide ' + i + '\n\nParagraph ' + i).join('\n---\n');
+  const ranges = vm.runInContext('md2slidesMarkdown.getSlideSourceRanges(deckSource)', measured, { timeout: 3000 });
+  assert.equal(ranges.separators.length, 999);
+  assert.equal(ranges.separators[0], 3);
+  assert.equal(ranges.separators[998], 3995);
+  assert.equal(ranges.fences.length, 0);
+  assert.ok(measured.blockSourceBytes <= measured.deckSource.length * 4,
+    'Source indexes must not be rebuilt over the remaining full deck at every slide');
+});

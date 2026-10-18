@@ -1097,43 +1097,17 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     });
 }
 
-    // Share fence rules between slide splitting, source-line mapping and rendering.
-    function markdownFenceOpener(line) {
-        // List-nested fences may be indented 4+ spaces (or with tabs).
-        // Treat all indentation consistently with slide separator detection.
-        const match = /^[ \t]*(`{3,}|~{3,})(.*)$/.exec(line);
-        if (!match || (match[1][0] === '`' && match[2].includes('`'))) return null;
-        return { marker: match[1][0], length: match[1].length, info: match[2].trim() };
-    }
-
-    function markdownFenceCloser(line, fence) {
-        const match = /^[ \t]*(`{3,}|~{3,})[ \t]*$/.exec(line);
-        return !!match && match[1][0] === fence.marker && match[1].length >= fence.length;
-    }
-
     function splitSlideSections(markdown) {
-        const lines = (markdown || '').replace(/\r/g, '').split('\n');
+        const source = (markdown || '').replace(/\r/g, '');
+        const lines = source.split('\n');
+        const { separators } = window.md2slidesMarkdown.getSlideSourceRanges(source);
         const sections = [];
-        let buffer = [];
         let start = 0;
-        let fence = null;
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i];
-            if (fence) {
-                if (markdownFenceCloser(line, fence)) fence = null;
-            } else {
-                const opener = markdownFenceOpener(line);
-                if (opener) fence = opener;
-                else if (line.trim() === '---') {
-                    sections.push({ markdown: buffer.join('\n'), start, end: i - 1 });
-                    buffer = [];
-                    start = i + 1;
-                    continue;
-                }
-            }
-            buffer.push(line);
+        for (const line of separators) {
+            sections.push({ markdown: lines.slice(start, line).join('\n'), start, end: line - 1 });
+            start = line + 1;
         }
-        sections.push({ markdown: buffer.join('\n'), start, end: lines.length - 1 });
+        sections.push({ markdown: lines.slice(start).join('\n'), start, end: lines.length - 1 });
         return sections;
     }
 
