@@ -412,6 +412,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     dom.markdown.addEventListener('input', () => {
         window.clearTimeout(timer);
         timer = window.setTimeout(() => {
+            timer = null;
+            if (exportingPdf) return;
             // 重新编译幻灯片
             compileAndRender();
             // 根据当前光标位置重新对齐到对应基础幻灯片的最后一个渐进步骤
@@ -1295,6 +1297,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     async function handleExport(type, btn) {
         if (exportingPdf) return; // 已在导出中，直接忽略
         exportingPdf = true;
+        // Export compiles the current input itself. A pending editor callback
+        // must not navigate the shared stage while export awaits its assets.
+        window.clearTimeout(timer);
+        timer = null;
 
         // 记录按钮状态并禁用，避免重复点击
         const originalText = btn.textContent;
