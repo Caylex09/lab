@@ -665,6 +665,18 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
         // 自动模式：保持原有逻辑
 
+        // Use the same content rules when assigning and revealing a step.
+        const hasTextOrImage = el => el.textContent.trim().length > 0 || !!el.querySelector('img');
+        const hasProgressiveContent = el => {
+            if (el.tagName === 'TR') {
+                return Array.from(el.querySelectorAll('td')).some(hasTextOrImage);
+            }
+            if (el.tagName === 'PRE' && el.classList.contains('code')) {
+                return !!el.querySelector('code')?.textContent.trim().length;
+            }
+            return hasTextOrImage(el);
+        };
+
         // 查找所有可渐进显示的元素，按照它们在 DOM 中的顺序处理
         const progressiveElements = [];
         let elementIndex = 0;
@@ -749,22 +761,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
             if (shouldProcess) {
                 // 检查元素是否有实际内容，跳过空内容
-                let hasContent = false;
-                if (node.tagName === 'P') {
-                    // 段落：检查文本内容是否为空
-                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
-                } else if (node.tagName === 'LI') {
-                    // 列表项：检查文本内容是否为空
-                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
-                } else if (node.tagName === 'TR') {
-                    // 表格行：检查是否有单元格内容
-                    hasContent = Array.from(node.querySelectorAll('td')).some(td => td.textContent.trim().length > 0);
-                } else {
-                    // 其他元素（标题、blockquote、admonition）：检查文本内容
-                    hasContent = node.textContent.trim().length > 0 || !!node.querySelector('img');
-                }
-
-                if (hasContent) {
+                if (hasProgressiveContent(node)) {
                     node.setAttribute('data-progressive-index', elementIndex++);
                     progressiveElements.push(node);
                 }
@@ -790,6 +787,8 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             NodeFilter.SHOW_ELEMENT,
             {
                 acceptNode: function (codeEl) {
+                    // The admonition already owns this entire reveal step.
+                    if (codeEl.closest('.admonition')) return NodeFilter.FILTER_REJECT;
                     if ((codeEl.tagName === 'PRE' && codeEl.classList.contains('code')) ||
                         codeEl.classList.contains('mermaid')) {
                         return NodeFilter.FILTER_ACCEPT;
@@ -949,19 +948,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                 .filter(el => parseInt(el.getAttribute('data-progressive-index')) === i);
 
             // 检查是否有实际内容（由于已经过滤了空元素，这里应该总是有内容）
-            const hasRealContent = newElements.length > 0 && newElements.some(el => {
-                if (el.tagName === 'P' || el.tagName === 'LI') {
-                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
-                } else if (el.tagName === 'TR') {
-                    return Array.from(el.querySelectorAll('td')).some(td => td.textContent.trim().length > 0);
-                } else if (el.tagName === 'PRE' && el.classList.contains('code')) {
-                    return el.querySelector('code')?.textContent.trim().length > 0;
-                } else if (el.classList.contains('mermaid')) {
-                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
-                } else {
-                    return el.textContent.trim().length > 0 || !!el.querySelector('img');
-                }
-            });
+            const hasRealContent = newElements.some(hasProgressiveContent);
 
             // 如果没有实际内容，跳过这一页
             if (!hasRealContent) {
@@ -1017,6 +1004,10 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
         console.log(`\n总共生成了 ${progressiveSlides.length} 页渐进式幻灯片\n`);
 
+        // Every authored section needs a page, even if all indexed blocks are
+        // empty. The final step must also retain content skipped as an empty step.
+        if (!progressiveSlides.length) return [html];
+        progressiveSlides[progressiveSlides.length - 1] = html;
         return progressiveSlides;
     }
 
