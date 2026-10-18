@@ -193,3 +193,81 @@ test('a short nested fence cannot close a longer indented fence', async ({ page 
   await expect(page.locator('#currentSlide pre.code code')).toContainText('still inside');
   await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
 });
+
+test('fences on a list marker line keep internal separators and caret ownership', async ({ page }) => {
+  for (const fence of ['```', '~~~']) {
+    const markdown = ['- ' + fence + 'text', '  inside', '  ---', '  still code',
+      '  ' + fence, '---', '# Next slide'].join('\n');
+    await page.locator('#markdownInput').fill(markdown);
+    await expect(page.locator('#slideTotal')).toHaveText('2');
+    await page.locator('#slideInput').fill('1');
+    await page.locator('#slideInput').blur();
+    await expect(page.locator('#currentSlide pre.code code')).toHaveText('inside\n---\nstill code');
+    await page.locator('#markdownInput').evaluate(el => {
+      const caret = el.value.indexOf('  ---') + 3;
+      el.setSelectionRange(caret, caret);
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.locator('#slideInput')).toHaveValue('1');
+    await page.locator('#markdownInput').evaluate(el => {
+      const caret = el.value.lastIndexOf('\n---\n') + 1;
+      el.setSelectionRange(caret, caret);
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.locator('#slideInput')).toHaveValue('2');
+    await expect(page.locator('#currentSlide h1')).toHaveText('Next slide');
+  }
+});
+
+test('root indented fence-like code does not swallow the next slide', async ({ page }) => {
+  for (const indent of ['    ', '\t']) {
+    await page.locator('#markdownInput').fill([indent + '~~~', '---', '# Next slide'].join('\n'));
+    await expect(page.locator('#slideTotal')).toHaveText('2');
+    await page.locator('#slideInput').fill('1');
+    await page.locator('#slideInput').blur();
+    await expect(page.locator('#currentSlide pre.code code')).toHaveText('~~~');
+    await page.locator('#markdownInput').evaluate(el => {
+      const caret = el.value.indexOf('---');
+      el.setSelectionRange(caret, caret);
+      el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+    await expect(page.locator('#slideInput')).toHaveValue('2');
+    await expect(page.locator('#currentSlide h1')).toHaveText('Next slide');
+  }
+});
+
+test('legacy ordered-list blank lines do not shift fence source ranges', async ({ page }) => {
+  const markdown = ['10. parent', '  3. child', '    ```js', '    ---',
+    '    ```', '---', '# Next slide'].join('\n');
+  await page.locator('#markdownInput').fill(markdown);
+  await expect(page.locator('#slideTotal')).toHaveText('2');
+  await page.locator('#slideInput').fill('1');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide pre.code')).toHaveCount(1);
+  await expect(page.locator('#currentSlide pre.code code')).toContainText('---');
+  await page.locator('#markdownInput').evaluate(el => {
+    const caret = el.value.indexOf('    ---') + 5;
+    el.setSelectionRange(caret, caret);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('1');
+  await page.locator('#markdownInput').evaluate(el => {
+    const caret = el.value.indexOf('# Next slide');
+    el.setSelectionRange(caret, caret);
+    el.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await expect(page.locator('#slideInput')).toHaveValue('2');
+  await expect(page.locator('#currentSlide h1')).toHaveText('Next slide');
+});
+
+test('slide boundaries reset block context before a later fenced slide', async ({ page }) => {
+  await page.locator('#markdownInput').fill(['- ```text', '  first', '  ```', '---',
+    '~~~text', 'second', '---', 'still', '~~~', '---', '# Next'].join('\n'));
+  await expect(page.locator('#slideTotal')).toHaveText('3');
+  await page.locator('#slideInput').fill('2');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide pre.code code')).toHaveText('second\n---\nstill');
+  await page.locator('#slideInput').fill('3');
+  await page.locator('#slideInput').blur();
+  await expect(page.locator('#currentSlide h1')).toHaveText('Next');
+});

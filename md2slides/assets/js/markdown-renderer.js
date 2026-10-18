@@ -274,8 +274,40 @@
     // fenced code content or non-marker lines.
     // Compatible two-space list convention, including ordered-list marker
     // widths. markdown-it itself owns the resulting list structure.
-    function normalizeListMarkers(source) {
+    const SLIDE_BOUNDARY_PROBE = Symbol('slideBoundaryProbe');
+    function parseSourceBlocks(source, splitSlides = false) {
+        const tokens = [], env = {};
+        if (!splitSlides) {
+            md.block.parse(source, md, env, tokens);
+            return { tokens, separators: [] };
+        }
+        const lines = source.split('\n'), nextSeparator = [];
+        let next = lines.length;
+        for (let line = lines.length - 1; line >= 0; line--) {
+            if (lines[line].trim() === '---') next = line;
+            nextSeparator[line] = next;
+        }
+        const probe = { nextSeparator, stoppedAt: null, dispatch: [] };
+        env[SLIDE_BOUNDARY_PROBE] = probe;
+        const state = new md.block.State(source, md, env, tokens);
+        const end = state.lineMax, separators = [];
+        let start = 0;
+        while (start < end) {
+            probe.stoppedAt = null;
+            // Container rules return normally, restoring their temporary line
+            // shifts before the next slide starts. Reuse the line index rather
+            // than reparsing an ever-shorter full document for every separator.
+            md.block.tokenize(state, start, end);
+            if (probe.stoppedAt === null) break;
+            separators.push(probe.stoppedAt);
+            start = probe.stoppedAt + 1;
+        }
+        return { tokens, separators };
+    }
+
+    function normalizeListMarkers(source, sourceMap, splitSlides = false) {
         const output = [], frames = [];
+        let sourceLine = 0;
         // A closing math delimiter can share its physical line with another
         // native block. Process that suffix as a virtual line, then join its
         // output back without the owning container's synthetic indentation.
@@ -287,16 +319,19 @@
                     const leading = value.match(/^ */)[0].length;
                     output[output.length - 1] += value.slice(Math.min(leading, joinBase));
                     joinBase = -1;
-                } else output.push(value);
+                } else {
+                    output.push(value);
+                    sourceMap?.push(sourceLine);
+                }
             }
         };
         // Let the native block parser identify opaque source ranges before
         // applying the legacy indentation convention. TeX contents cannot
         // open fences/list frames, and root indented code is never a list.
-        const blocks = [];
-        md.block.parse(source, md, {}, blocks);
+        const { tokens: blocks } = parseSourceBlocks(source, splitSlides);
         const sourceLines = source.split('\n');
         const mathLines = new Map(), mathEnds = new Map(), codeLines = new Map();
+        const fencedLines = new Set();
         const nativeItems = [];
         let quoteDepth = 0;
         for (const token of blocks) {
@@ -305,6 +340,9 @@
             if (token.type === 'blockquote_open') quoteDepth++;
             if (token.type === 'blockquote_close') quoteDepth--;
             if (!token.map) continue;
+            if (token.type === 'fence') {
+                for (let line = token.map[0]; line < token.map[1]; line++) fencedLines.add(line);
+            }
             const owner = nativeItems[nativeItems.length - 1];
             if (token.type === 'slide_math') {
                 for (let line = token.map[0]; line < token.map[1]; line++)
@@ -356,6 +394,7 @@
             .find(frame => frame.sourceLine === owner.map[0]);
         for (const record of records) {
             const { lineNumber } = record;
+            sourceLine = lineNumber;
             if (lineNumber === consumedFenceLine) continue;
             let line = record.text;
             if (fence) {
@@ -377,6 +416,13 @@
                         ' '.repeat(fence.ownerIndent) + line : line);
                 }
                 consumedFenceLine = lineNumber;
+                continue;
+            }
+            if (splitSlides && sourceLines[lineNumber].trim() === '---' &&
+                !fencedLines.has(lineNumber)) {
+                emit(line);
+                frames.length = 0;
+                blankCount = 0;
                 continue;
             }
             if (record.join) {
@@ -442,8 +488,10 @@
                 const depth = Math.floor(indent(match[1]) / 2);
                 const before = frames[frames.length - 1];
                 // Existing editor treats two blank lines as separate lists.
-                if (blankCount >= 2 && depth === 0 && before)
+                if (blankCount >= 2 && depth === 0 && before) {
                     output.splice(output.length - 1, 0, LIST_BOUNDARY);
+                    sourceMap?.splice(sourceMap.length - 1, 0, lineNumber);
+                }
                 while (frames.length && frames[frames.length - 1].depth >= depth) frames.pop();
                 const parent = frames[frames.length - 1];
                 const target = parent && depth ? parent.target + parent.width : depth * 2;
@@ -698,7 +746,57 @@
     }, { alt: ['paragraph', 'list'] });
     md.renderer.rules.slide_list_boundary = () => '';
 
+    // Only source-range probes enable this slide-specific boundary rule.
+    // Native fences consume their bodies before another block rule is tried.
+    md.block.ruler.before('table', 'slide_separator_probe', (state, start, end, silent) => {
+        const probe = state.env[SLIDE_BOUNDARY_PROBE];
+        if (!probe || (probe.stoppedAt === null && probe.nextSeparator[start] !== start)) return false;
+        if (!silent) {
+            if (probe.stoppedAt === null) probe.stoppedAt = start;
+            state.line = end;
+        }
+        return true;
+    }, { alt: ['paragraph', 'reference', 'blockquote', 'list'] });
+
+    for (const rule of md.block.ruler.__rules__.slice()) {
+        if (rule.name === 'slide_separator_probe') continue;
+        const native = rule.fn;
+        md.block.ruler.at(rule.name, (state, start, end, silent) => {
+            const probe = state.env[SLIDE_BOUNDARY_PROBE];
+            if (!probe) return native(state, start, end, silent);
+            const dispatch = probe.dispatch[probe.dispatch.length - 1];
+            // Math searches only within this slide, but its suffix may open a
+            // native container/fence. Give that dispatch the original container
+            // end, so the fence rule itself decides where the body finishes.
+            if (dispatch && end === dispatch.limit && state.level === dispatch.level &&
+                state.blkIndent === dispatch.indent && state.parentType === dispatch.parent)
+                end = dispatch.end;
+            if (['fence', 'list', 'blockquote'].includes(rule.name))
+                return native(state, start, end, silent);
+            const limit = Math.min(end, probe.nextSeparator[start] ?? end);
+            if (rule.name !== 'slide_math' || limit === end)
+                return native(state, start, limit, silent);
+            probe.dispatch.push({ limit, end, level: state.level,
+                indent: state.blkIndent, parent: state.parentType });
+            try { return native(state, start, limit, silent); }
+            finally { probe.dispatch.pop(); }
+        }, { alt: rule.alt });
+    }
+
     window.md2slidesMarkdown = {
+        getSlideSourceRanges(source) {
+            source = (source || '').replace(/\r/g, '');
+            reserveSyntaxMarkers(source);
+            const sourceMap = [];
+            const normalized = normalizeListMarkers(source, sourceMap, true);
+            const { tokens, separators } = parseSourceBlocks(normalized, true);
+            return {
+                separators: [...new Set(separators.map(line => sourceMap[line]))],
+                fences: tokens.filter(token => token.type === 'fence' && token.map)
+                    .map(token => ({ start: sourceMap[token.map[0]],
+                        end: sourceMap[token.map[1] - 1] + 1 }))
+            };
+        },
         render(source) {
             reserveSyntaxMarkers(source);
             const normalized = normalizeListMarkers(source);

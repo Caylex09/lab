@@ -6,6 +6,13 @@ Open [the hosted editor](https://lab.cyx2009.top/md2slides/) or serve this direc
 
 Slides are separated by a line containing `---`, except inside a fenced code block. Both backtick and tilde fences are supported, with matching closing markers at least as long as the opening fence. Choose **Manual** mode and insert `\\pause` to reveal content incrementally. The editor saves drafts in your browser's local storage.
 
+Slide boundaries and cursor navigation use the adapter's native block source
+ranges, including fences that start on a list-marker line. Compatibility
+indentation records the original source line for inserted lines, so a fence's
+closing line cannot hide the following separator. Each slide starts with fresh
+block-container context; root indented code that merely looks like a fence does
+not consume later slide boundaries.
+
 ## Markdown parser
 
 Core Markdown uses the locally vendored **markdown-it 14.1.0** (MIT; license:
