@@ -21,7 +21,7 @@ test.beforeEach(async ({ page }) => {
   await page.locator('#preview').focus();
 });
 
-for (const shortcut of ['Control+f', 'Meta+f', 'Alt+ArrowRight', 'Control+End']) {
+for (const shortcut of ['Control+f', 'Meta+f', 'Alt+ArrowRight', 'Control+End', 'Shift+Space', 'Shift+End']) {
   test(`${shortcut} remains available while the preview is focused`, async ({ page }) => {
     await page.keyboard.press(shortcut);
     expect(await page.evaluate(() => window.__lastKey?.prevented)).toBe(false);
@@ -43,5 +43,9 @@ test('unmodified presentation navigation and fullscreen shortcuts still work', a
   await page.keyboard.press('f');
   await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('preview');
   await page.keyboard.press('f');
+  await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
+  await page.keyboard.press('Shift+f');
+  await expect.poll(() => page.evaluate(() => document.fullscreenElement?.id)).toBe('preview');
+  await page.keyboard.press('Shift+f');
   await expect.poll(() => page.evaluate(() => !!document.fullscreenElement)).toBe(false);
 });
