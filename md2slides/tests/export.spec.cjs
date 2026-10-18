@@ -11,6 +11,7 @@ test.beforeEach(async ({ page }) => {
       }
     };
     window.html2canvas = async container => {
+      (window.__capturedHeadings ||= []).push(container.querySelector('h1')?.textContent);
       window.__capture = {
         diagramReady: !!container.querySelector('.mermaid-render svg'),
         imagesReady: [...container.querySelectorAll('img')].every(img => img.complete && img.naturalWidth > 0),
@@ -28,6 +29,7 @@ test.beforeEach(async ({ page }) => {
     window.print = () => {
       const container = document.querySelector('#print-container');
       window.__printed = {
+        headings: [...container.querySelectorAll('h1')].map(el => el.textContent),
         exists: !!container,
         diagramReady: !!container?.querySelector('.mermaid-render svg'),
         imagesReady: [...(container?.querySelectorAll('img') || [])].every(img => img.complete && img.naturalWidth > 0),
@@ -43,6 +45,37 @@ test.beforeEach(async ({ page }) => {
   });
   await page.goto('/');
 });
+
+for (const type of ['raster', 'print']) {
+  test(`${type} PDF preserves page order when export starts during pending editor input`, async ({ page }) => {
+    const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4//8/AwAI/AL+Iy6bdQAAAABJRU5ErkJggg==', 'base64');
+    await page.route('**/pending-edit.png', async route => {
+      await new Promise(resolve => setTimeout(resolve, 650));
+      await route.fulfill({ contentType: 'image/png', body: tinyPng });
+    });
+    await page.locator('#paginationMode').selectOption('manual');
+    await page.locator('#markdownInput').fill('# Existing');
+    await expect(page.locator('#currentSlide h1')).toHaveText('Existing');
+
+    // Dispatch both actions in the same task so export always starts before
+    // the 180 ms editor debounce. The slow image lets that callback run mid-export.
+    await page.evaluate(exportType => {
+      const editor = document.querySelector('#markdownInput');
+      editor.value = '# First\n\n![slow](/pending-edit.png)\n---\n# Second';
+      editor.setSelectionRange(editor.value.length, editor.value.length);
+      editor.dispatchEvent(new Event('input', { bubbles: true }));
+      document.querySelector(exportType === 'raster' ? '#exportPdfImg' : '#exportPdfPrint').click();
+    }, type);
+
+    await expect.poll(() => page.evaluate(exportType =>
+      exportType === 'raster' ? !!window.__savedPdf : !!window.__printed, type)).toBe(true);
+    const headings = await page.evaluate(exportType =>
+      exportType === 'raster' ? window.__capturedHeadings : window.__printed.headings, type);
+    expect(headings).toEqual(['First', 'Second']);
+    await expect(page.locator('#export-overlay')).toHaveCount(0);
+    await expect(page.locator('#markdownInput')).toBeEnabled();
+  });
+}
 
 test('image PDF waits for asynchronous Mermaid before capture', async ({ page }) => {
   await page.locator('#paginationMode').selectOption('manual');
