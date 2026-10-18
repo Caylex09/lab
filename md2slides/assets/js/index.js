@@ -1057,9 +1057,9 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     }
     // 新增 renderKaTeX 函数
     // 修改 renderKaTeX 函数，处理块引用中的数学公式
-    function renderKaTeX(root = dom.currentSlide) {
+    function renderKaTeX(root = dom.currentSlide, { strict = false } = {}) {
     // Wait for the scheduled DOM mutations, not a fixed number of milliseconds.
-    return new Promise(resolve => {
+    return new Promise((resolve, reject) => {
         requestAnimationFrame(() => {
             try {
                 if (typeof renderMathInElement !== 'undefined') {
@@ -1079,12 +1079,15 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
                         if (!block.classList.contains('hljs')) hljs.highlightElement(block);
                     });
                 }
-                Promise.resolve(renderMermaid(root)).catch(error => {
+                Promise.resolve(renderMermaid(root)).then(resolve, error => {
                     console.warn('Slide diagram rendering failed', error);
-                }).finally(resolve);
+                    if (strict) reject(error);
+                    else resolve();
+                });
             } catch (error) {
                 console.warn('Slide rendering failed', error);
-                resolve();
+                if (strict) reject(error);
+                else resolve();
             }
         });
     });
@@ -1116,50 +1119,83 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
     let mermaidRenderSequence = 0;
     const pendingMermaidRenders = new WeakMap();
 
+    function loadMermaidLibrary() {
+        const hasApi = () => typeof mermaid !== 'undefined' &&
+            typeof mermaid.initialize === 'function' && typeof mermaid.render === 'function';
+        if (hasApi()) return Promise.resolve();
+        if (!mermaidScriptPromise) {
+            const attempt = new Promise((resolve, reject) => {
+                const script = document.createElement('script');
+                let settled = false;
+                const finish = error => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeout);
+                    script.onload = script.onerror = null;
+                    if (error) {
+                        script.remove();
+                        reject(error);
+                    } else resolve();
+                };
+                const timeout = setTimeout(() => finish(new Error('Mermaid library load timed out')), 10000);
+                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js';
+                script.onload = () => finish(hasApi() ? null : new Error('Mermaid library API is unavailable'));
+                script.onerror = () => finish(new Error('Mermaid library failed to load'));
+                document.head.appendChild(script);
+            });
+            mermaidScriptPromise = attempt;
+            // Clear only this failed attempt; a later user action can retry.
+            attempt.catch(() => {
+                if (mermaidScriptPromise === attempt) mermaidScriptPromise = null;
+            });
+        }
+        return mermaidScriptPromise;
+    }
+
     function renderMermaid(root = dom.currentSlide) {
         const existing = pendingMermaidRenders.get(root);
-        if (existing) {
-            // A new slide can replace the same root while the old render is pending.
-            if (root.querySelector('.mermaid')) return existing.then(() => renderMermaid(root));
-            return existing;
+        if (existing && existing.nodes.some(node => root.contains(node))) {
+            return existing.job;
         }
+        if (existing) pendingMermaidRenders.delete(root);
+        // The stage element is reused. Jobs belonging to replaced slide nodes
+        // must not delay or reject rendering/export of the new content.
         const blocks = Array.from(root.querySelectorAll('.mermaid'));
         if (!blocks.length) return Promise.resolve();
 
-        const job = renderMermaidBlocks(blocks);
-        pendingMermaidRenders.set(root, job);
+        const entry = { nodes: [...blocks], job: null };
+        const job = renderMermaidBlocks(blocks, entry.nodes);
+        entry.job = job;
+        pendingMermaidRenders.set(root, entry);
         const clear = () => {
-            if (pendingMermaidRenders.get(root) === job) pendingMermaidRenders.delete(root);
+            if (pendingMermaidRenders.get(root) === entry) pendingMermaidRenders.delete(root);
         };
-        job.then(clear, clear);
+        // Keep a failed result while its fallback nodes remain in this slide.
+        // Otherwise the preview can consume the error before strict export sees it.
+        job.then(clear, () => {});
         return job;
     }
 
-    async function renderMermaidBlocks(blocks) {
-    if (typeof mermaid === 'undefined') {
-        if (!mermaidScriptPromise) {
-            mermaidScriptPromise = new Promise(resolve => {
-                const script = document.createElement('script');
-                script.src = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/9.4.3/mermaid.min.js';
-                script.onload = () => resolve(true);
-                script.onerror = () => resolve(false);
-                document.head.appendChild(script);
-            });
-        }
-        const loaded = await mermaidScriptPromise;
-        if (!loaded || typeof mermaid === 'undefined') {
-            console.warn('Mermaid failed to load');
-            return;
-        }
+    async function renderMermaidBlocks(blocks, renderNodes) {
+    try {
+        await loadMermaidLibrary();
+    } catch (error) {
+        blocks.forEach(el => {
+            const code = (el.textContent || '').trim();
+            el.classList.replace('mermaid', 'mermaid-render');
+            el.innerHTML = `<pre class="code"><code>${escapeHtml(code)}</code></pre>`;
+        });
+        throw error;
     }
     const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
     mermaid.initialize({ startOnLoad: false, theme, securityLevel: 'strict' });
-    await Promise.all(blocks.map(el => new Promise(resolve => {
+    await Promise.all(blocks.map((el, blockIndex) => new Promise((resolve, reject) => {
         const code = (el.textContent || '').trim();
         const id = `mmd-export-${++mermaidRenderSequence}`;
         const container = document.createElement('div');
         container.className = 'mermaid-render';
         el.replaceWith(container);
+        renderNodes[blockIndex] = container;
         let done = false;
         const finish = svg => {
             if (done) return;
@@ -1174,7 +1210,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
             clearTimeout(timeout);
             console.warn('Mermaid render failed', error);
             container.innerHTML = `<pre class="code"><code>${escapeHtml(code)}</code></pre>`;
-            resolve();
+            reject(error);
         };
         // A broken Mermaid callback must not stall PDF export indefinitely.
         const timeout = setTimeout(() => fallback(new Error('Mermaid render timed out')), 10000);
@@ -1466,7 +1502,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
                 for (let i = 0; i < slides.length; i++) {
                     realStage.querySelector("#currentSlide").innerHTML = slides[i];
-                    await renderKaTeX();
+                    await renderKaTeX(dom.currentSlide, { strict: true });
                     await waitForExportAssets(realStage.querySelector('#currentSlide'));
 
                     const cloneStage = realStage.cloneNode(true);
@@ -1544,7 +1580,7 @@ update on 2026 May 4th: 现在支持了 window.print() 的导出方案，体积�
 
                 for (let i = 0; i < slides.length; i++) {
                     realStage.querySelector("#currentSlide").innerHTML = slides[i];
-                    await renderKaTeX();
+                    await renderKaTeX(dom.currentSlide, { strict: true });
                     await waitForExportAssets(realStage.querySelector('#currentSlide'));
 
                     const cloneStage = realStage.cloneNode(true);
