@@ -72,3 +72,122 @@ test('saving an empty markdown document persists after reload', async ({ page })
   await page.reload();
   await expect(page.locator('#markdownInput')).toHaveValue('');
 });
+
+test('denied browser storage leaves preview theme and watermark controls usable', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'localStorage', {
+      get() { throw new DOMException('Storage access denied', 'SecurityError'); }
+    });
+  });
+  await page.reload();
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('# Draft without storage');
+  await expect(page.locator('#currentSlide h1')).toHaveText('Draft without storage');
+  await page.locator('#themeSelect').selectOption('dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.locator('#watermarkBtn').click();
+  await page.locator('#watermarkInput').fill('Unsaved settings');
+  await page.locator('#watermarkSave').click();
+  await expect(page.locator('#watermarkModal')).toBeHidden();
+  await page.locator('#saveContent').click();
+  await expect(page.locator('#saveContent')).not.toHaveText('Saved!');
+  await expect(page.locator('#storageStatus')).toBeVisible();
+  await expect(page.locator('#storageStatus')).toContainText('Copy your Markdown');
+  expect(errors).toEqual([]);
+});
+
+test('quota failures report manual and automatic save failures and recover after a successful write', async ({ page }) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.addInitScript(() => {
+    const originalSetItem = Storage.prototype.setItem;
+    window.__denyStorageWrites = true;
+    window.__draftWriteAttempts = 0;
+    Storage.prototype.setItem = function (key, value) {
+      if (key === 'm2s-markdown-content') window.__draftWriteAttempts++;
+      if (window.__denyStorageWrites) throw new DOMException('Storage quota exceeded', 'QuotaExceededError');
+      return originalSetItem.call(this, key, value);
+    };
+  });
+  await page.clock.install();
+  await page.reload();
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('# Unsaved draft');
+  await page.clock.fastForward(250);
+  await expect(page.locator('#currentSlide h1')).toHaveText('Unsaved draft');
+  await page.locator('#themeSelect').selectOption('dark');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.locator('#saveContent').click();
+  await expect(page.locator('#saveContent')).not.toHaveText('Saved!');
+  await expect(page.locator('#storageStatus')).toContainText('Draft could not be saved');
+  const attempts = await page.evaluate(() => window.__draftWriteAttempts);
+  await page.clock.fastForward(10000);
+  expect(await page.evaluate(() => window.__draftWriteAttempts)).toBeGreaterThan(attempts);
+  await expect(page.locator('#storageStatus')).toBeVisible();
+  await page.locator('#markdownInput').fill('# Recoverable draft');
+  await page.clock.fastForward(250);
+  await expect(page.locator('#currentSlide h1')).toHaveText('Recoverable draft');
+  await page.evaluate(() => { window.__denyStorageWrites = false; });
+  await page.locator('#themeSelect').selectOption('light');
+  await expect(page.locator('#storageStatus')).toContainText('Draft could not be saved');
+  await page.locator('#watermarkBtn').click();
+  await page.locator('#watermarkInput').fill('Recovered setting');
+  await page.locator('#watermarkSave').click();
+  await expect(page.locator('#storageStatus')).toContainText('Draft could not be saved');
+  await page.clock.fastForward(10000);
+  expect(await page.evaluate(() => localStorage.getItem('m2s-markdown-content'))).toBe('# Recoverable draft');
+  await expect(page.locator('#storageStatus')).toBeHidden();
+  await page.locator('#saveContent').click();
+  await expect(page.locator('#saveContent')).toHaveText('Saved!');
+  expect(errors).toEqual([]);
+});
+
+test('successful storage saves restore the draft theme and watermark after reload', async ({ page }) => {
+  await page.locator('#markdownInput').fill('# Saved draft\n\nText');
+  await page.locator('#themeSelect').selectOption('dark');
+  await page.locator('#watermarkBtn').click();
+  await page.locator('#watermarkInput').fill('Saved watermark');
+  await page.locator('#watermarkSave').click();
+  await page.locator('#saveContent').click();
+  await expect(page.locator('#saveContent')).toHaveText('Saved!');
+  await page.reload();
+  await expect(page.locator('#markdownInput')).toHaveValue('# Saved draft\n\nText');
+  await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await expect(page.locator('#watermarkInput')).toHaveValue('Saved watermark');
+  await expect(page.locator('#storageStatus')).toBeHidden();
+});
+
+test('an unreadable saved draft is protected until an explicit successful Save', async ({ page }) => {
+  await page.locator('#markdownInput').fill('# Original saved draft');
+  await page.locator('#saveContent').click();
+  await page.addInitScript(() => {
+    const originalGetItem = Storage.prototype.getItem;
+    window.__readStoredDraft = () => originalGetItem.call(localStorage, 'm2s-markdown-content');
+    Storage.prototype.getItem = function (key) {
+      if (key === 'm2s-markdown-content') throw new DOMException('Draft read denied', 'SecurityError');
+      return originalGetItem.call(this, key);
+    };
+  });
+  await page.clock.install();
+  await page.reload();
+  await expect(page.locator('#storageStatus')).toContainText('Automatic saving is paused');
+  await page.locator('#paginationMode').selectOption('manual');
+  await page.locator('#markdownInput').fill('# Replacement draft');
+  await page.clock.fastForward(250);
+  await expect(page.locator('#currentSlide h1')).toHaveText('Replacement draft');
+  await page.clock.fastForward(10000);
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+  expect(await page.evaluate(() => window.__readStoredDraft())).toBe('# Original saved draft');
+  await page.locator('#saveContent').click();
+  await expect(page.locator('#saveContent')).toHaveText('Saved!');
+  await expect(page.locator('#storageStatus')).toBeHidden();
+  expect(await page.evaluate(() => window.__readStoredDraft())).toBe('# Replacement draft');
+  await page.locator('#markdownInput').fill('# Later automatic save');
+  await page.clock.fastForward(10250);
+  expect(await page.evaluate(() => window.__readStoredDraft())).toBe('# Later automatic save');
+  await page.locator('#markdownInput').fill('# Later unload save');
+  await page.evaluate(() => window.dispatchEvent(new Event('beforeunload')));
+  expect(await page.evaluate(() => window.__readStoredDraft())).toBe('# Later unload save');
+});
